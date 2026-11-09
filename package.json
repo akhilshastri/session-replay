@@ -8,6 +8,8 @@
     "spike/*"
   ],
   "scripts": {
-    "spike": "bun run --filter rrweb-demo dev"
+    "spike": "bun run --filter rrweb-demo dev",
+    "sync:agents": "bun scripts/sync-agent-context.ts",
+    "check:agents": "bun scripts/sync-agent-context.ts --check"
   }
 }
