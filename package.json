@@ -1,0 +1,13 @@
+{
+  "name": "session-replay",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "spike/*"
+  ],
+  "scripts": {
+    "spike": "bun run --filter rrweb-demo dev"
+  }
+}

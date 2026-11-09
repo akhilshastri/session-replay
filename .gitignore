@@ -1,0 +1,28 @@
+# Deny by default: ignore every file, then allow only the file types we version.
+# A new kind of file (a .db, a .pem, a .env) stays out of git until someone adds it here on purpose.
+*
+!*/
+
+# Allowed file types
+!.gitignore
+!*.md
+!*.json
+!*.ts
+!*.tsx
+!*.js
+!*.mjs
+!*.html
+!*.css
+!*.svg
+!bun.lock
+
+# Re-deny generated, local and secret paths (later lines win over the allow list above)
+node_modules/
+dist/
+build/
+coverage/
+data/
+.remember/
+.env*
+*.credentials.json
+.claude/settings.local.json
