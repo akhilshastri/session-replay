@@ -376,12 +376,79 @@ subjects(subject_hmac PK, user_id)                     -- row deleted on erasure
 - [ ] The kill switch stops the recorder without a host redeploy.
 - [ ] A user who isn't on the allow-list loads only the config: no rrweb, no listeners, and no measurable overhead.
 
-## Tasks
+## Sub-plans and parallel execution
 
-Order: **P1 ∥ P1b → protocol → P2 ∥ P3 → P4 ∥ P5 → P6 → pilot.** Each phase is split into
-one-task coder slices with `owns:` once the plan is approved.
+This plan is the **master**: goal, scope, decisions (D-rows), cross-cutting acceptance, risks and
+the log. Each part has its own sub-plan with design, "how it works" code samples, guidelines,
+acceptance and one-coder-run task slices. Sub-plans inherit every D-row from here and may add
+local L-rows. A decision that affects more than one sub-plan is made here.
+
+| Plan | Covers | Owns (no overlap) |
+|---|---|---|
+| [02-spikes.md](02-spikes.md) | P1 performance, P1a gate patch, P1b module federation | `spike/perf-grid/`, `spike/mf-plugin/`, `patches/` |
+| [03-protocol.md](03-protocol.md) | Shared contracts: events, ingest, config, bridge, query API, golden fixtures | `packages/protocol/` |
+| [04-recorder.md](04-recorder.md) | `recorder-engine` (rrweb adapters, incl. `ReplayEngine`) + browser recorder + upload pipeline | `packages/recorder-engine/`, `packages/recorder/` |
+| [05-server.md](05-server.md) | Ingest, DB worker, storage, query API, access log, retention, OpenShift | `apps/server/`, `deploy/openshift/` |
+| [06-replay-ui.md](06-replay-ui.md) | Router SPA: sessions, player, actions, state, hotspots | `apps/replay-ui/` |
+| [07-state-plugin.md](07-state-plugin.md) | Build plugin (call-site transform) + Redux wrapper + fixture apps | `packages/state-plugin/`, `fixtures/apps/` |
+| [08-integration.md](08-integration.md) | How-to guide for the real workspace: packaging, host setup, build config, grids, rollout | `docs/integration/`, `examples/` |
+
+### Batches
+
+At most **3 agents at once** (global rules). Lanes in the same batch never share files (see
+"Owns"). A batch starts when the batch before it has passed review.
+
+```mermaid
+flowchart LR
+  B0["B0 spikes<br/>lane1: P1a→P1 · lane2: P1b"] --> B1["B1 contracts + scaffolds<br/>protocol · package skeletons"]
+  B1 --> B2["B2 core (3 lanes)<br/>recorder-engine core · server ingest+storage · UI shell on mocks"]
+  B2 --> B3["B3 features (3 lanes)<br/>recorder pipeline/flush/budget · server query+access+hotspots+config · UI player/actions/state<br/>(+ state plugin when a lane frees)"]
+  B3 --> B4["B4 cross-cutting (3 lanes)<br/>assets + rate caps end-to-end · fixture apps + e2e · OpenShift manifests"]
+  B4 --> B5["B5 real workspace<br/>integration dry run · pilot"]
+```
+
+| Batch | Lane 1 | Lane 2 | Lane 3 | Gate to pass before the next batch |
+|---|---|---|---|---|
+| **B0** | 02: P1a → P1 harness → runs | 02: P1b MF spike | — (the leader runs long measurements in the background) | Results written back into this plan; D11 and D36 defaults set; Q19 answered |
+| **B1** | 03: protocol schemas + fixtures | scaffolds: package skeletons, root scripts, lint/tsc/test wiring | — | `bunx tsc --noEmit` and `bun test` green at the root |
+| **B2** | 04: engine core (record, stamping, flush, checkpoints) | 05: ingest + DB worker + storage | 06: UI shell + session list on a mocked API | reviewer run on all three diffs (one batched run) |
+| **B3** | 04: pipeline, budget, hotspots, kill switch | 05: query API, access log, hotspots, config admin | 06: player, actions, state panel, access prompt | reviewer (batched); qa writes specs in parallel (`specs` mode) |
+| **B3b** | 07: state plugin + Redux wrapper | (frees as B3 lanes finish) | | reviewer |
+| **B4** | assets (D33) + rate caps end-to-end (04/05/06 slices, one owner at a time) | 07: fixture apps + e2e specs | 05: OpenShift manifests | **commit gate:** full e2e once, then the qa `gate` browser check |
+| **B5** | 08: integration dry run on a branch of the real workspace | pilot in one region | | pilot "done when" |
+
+### Rules for parallel agents
+
+1. **Contract first.** Code meets at `packages/protocol` (03). A lane that needs a contract change
+   stops and asks the leader. Contract changes are additive only and get a Log line in 03.
+2. **Mocks over waiting.** UI and server lanes use the 03 golden fixtures and a mocked API, so no
+   lane waits for another to finish.
+3. **One owner per file.** `owns:` in each slice is exclusive inside a batch. Shared root files
+   (`package.json`, `tsconfig.base.json`, `.gitignore`) belong to the B1 scaffold slice, and later
+   changes to them go through the leader.
+4. **Tier-1 checks per slice** (type-check, lint, unit tests for the touched package). e2e runs once
+   per batch gate, not per slice (global "Verifying cheaply").
+5. **Coder on Sonnet** for every slice (D15); reviewer, qa and debugger are batched per the global rules.
+6. **No code before approval.** These batches start only after the user approves this plan.
+
+### Baseline here, integration there
+
+This repo is the **baseline**. The real integration happens later in the user's own workspace
+(webpack 5 host + Vite 7 remotes, Redux + `useState`, flexlayout-react + AG Grid, OpenShift per
+region). Everything built here must be portable:
+- packages publish to an internal registry;
+- the server ships as a container image;
+- there are no hard-coded paths;
+- config comes from options or env.
+
+The fixture apps (07) imitate the real workspace. [08-integration.md](08-integration.md) is the
+step-by-step guide for B5.
+
+## Tasks (cross-cutting; component tasks live in the sub-plans)
 
 - [x] P0 Spike 1: rrweb record and replay basics — owns: `spike/rrweb-demo/` — done: commit 0002.
+- [ ] **Leader:** run the `auditor` on all sub-plans before the first B1 handoff (global "Plan audit before substantial handoffs").
+- [ ] *(Moved: P1, P1a and P1b now live in [02-spikes.md](02-spikes.md). The bullets below are kept until the sub-plans are merged, then removed.)*
 - [ ] **P1 Spike 2: performance stress test** — owns: `spike/perf-grid/` — done when: numbers are recorded here, the budget and fidelity defaults are chosen, and D23 is decided (none / a / c).
   - **Workload** (seeded): AG Grid with cell flash; a `full` order ticket; a 2 MB Redux store taking 200 actions/s on a deny-listed slice and 5/s app actions; 2 fetches/s; **realistic input**: typing at ~8 keys/s in bursts plus a click every 3 s; route changes and **periodic checkpoints included**.
   - **The real screen** (user, Q2):
@@ -492,6 +559,7 @@ one-task coder slices with `owns:` once the plan is approved.
 
 | # | Question | Proposed answer | Needs from you |
 |---|---|---|---|
+| 24 | How ticks reach AG Grid | P1 mimics the real update path (02-spikes L4) | `applyTransaction`, `applyTransactionAsync`, `rowNode.setDataValue`, or replacing `rowData`? Is cell flash on? |
 | 19 | *After P1:* the busiest desk doesn't fit | First lever: D36 rate caps on the market-data columns. If they still don't fit: a source fix (D32), or a larger budget for that desk | Pick the default caps per desk once P1 shows the numbers |
 
 Resolved: Q1 (every UI state, D16), Q11 (staff only, D19), Q12 (adapters on npm, D24),
