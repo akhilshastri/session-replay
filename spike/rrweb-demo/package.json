@@ -1,0 +1,25 @@
+{
+  "name": "rrweb-demo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun server.ts"
+  },
+  "dependencies": {
+    "@reduxjs/toolkit": "^2.14.0",
+    "@rrweb/record": "^2.2.2",
+    "@rrweb/replay": "^2.2.2",
+    "@rrweb/rrweb-plugin-network-record": "^2.2.2",
+    "@rrweb/types": "^2.2.2",
+    "react": "18",
+    "react-dom": "18",
+    "react-redux": "^9.3.1",
+    "zustand": "5"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.4",
+    "@types/react": "18",
+    "@types/react-dom": "18",
+    "typescript": "^7.0.2"
+  }
+}

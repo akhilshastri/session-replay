@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Mini shop (rrweb demo)</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <!-- Recorder boots first, as its own module, so it is recording before the app renders. -->
+    <script type="module" src="./boot.ts"></script>
+    <script type="module" src="./main.tsx"></script>
+  </body>
+</html>
