@@ -37,4 +37,4 @@ Start it once and reuse it. Put a time limit on waits.
 
 **Project rules:**
 - Recorder code must not depend on React or any state library: it runs outside every mini-app.
-- Never record secrets: mask inputs and strip tokens in the browser, before anything is sent.
+- Never record secrets (password fields, one-time codes, auth tokens, secret-named state keys): mask or strip them in the browser, before anything is sent. In the MVP everything else is recorded unmasked on purpose (`plan/01-session-replay.md`, D18).
