@@ -187,16 +187,16 @@ spike/mf-plugin/
 
 ## Tasks
 
-- [ ] **S1 P1a gate patch** — owns: `patches/`, root `package.json` (`patchedDependencies`), `.gitignore` (allow `*.patch`) — batch: **B0, lane 1** — depends on: — — done when: P1a acceptance passes.
-- [ ] **S2 P1 harness** (stress page + ticker + CDP collector) — owns: `spike/perf-grid/` — batch: **B0, lane 1** — depends on: S1, Q24 — done when: one variant produces a full metrics JSON.
-- [ ] **S3 P1 measurement runs + soak** — owns: `spike/perf-grid/results/` — batch: **B0, lane 1** — depends on: S2 — done when: the P1 acceptance items pass. The leader runs the long runs in the background with Bash; no agent sits idle during the 8-hour soak.
-- [ ] **S4 P1b MF transform spike** — owns: `spike/mf-plugin/` — batch: **B0, lane 2** — depends on: — — done when: the P1b acceptance passes.
+- [ ] **K1 P1a gate patch** — owns: `patches/`, root `package.json` (`patchedDependencies`), `.gitignore` (allow `*.patch`) — batch: **B0, lane 1** — depends on: — — done when: P1a acceptance passes.
+- [ ] **K2 P1 harness** (stress page + ticker + CDP collector) — owns: `spike/perf-grid/` — batch: **B0, lane 1** — depends on: K1, Q24 — done when: one variant produces a full metrics JSON.
+- [ ] **K3 P1 measurement runs + soak** — owns: `spike/perf-grid/results/` — batch: **B0, lane 1** — depends on: K2 — done when: the P1 acceptance items pass. The leader runs the long runs in the background with Bash; no agent sits idle during the 8-hour soak.
+- [ ] **K4 P1b MF transform spike** — owns: `spike/mf-plugin/` — batch: **B0, lane 2** — depends on: — — done when: the P1b acceptance passes.
 
 ## Risks
 
 | Risk | Mitigation |
 |---|---|
-| The ticker doesn't match the real app's update method, so the numbers mislead. | Q24 before S2; mirror the real code path. |
+| The ticker doesn't match the real app's update method, so the numbers mislead. | Q24 before K2; mirror the real code path. |
 | A Windows desktop throttles a background Chrome window, skewing timings (seen in the 0002 spike). | Run in a dedicated, visible, focused window; repeat ×3 and take the median. |
 | An 8-hour soak blocks the dev machine. | Run it overnight, in the background, outside agent runs. |
 

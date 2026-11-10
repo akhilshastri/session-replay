@@ -25,14 +25,14 @@ Every task comes from a plan file. Start with the master, then your sub-plan:
 
 | Plan | Covers |
 |---|---|
-| `plan/01-session-replay.md` | **Master:** goal, scope, decisions D1–D39, batches B0–B5, risks |
-| `plan/02-spikes.md` | Performance spike, rrweb gate patch, module-federation spike |
-| `plan/03-protocol.md` | **Shared contracts:** events, ingest, config, bridge, query API |
-| `plan/04-recorder.md` | `packages/recorder-engine`, `packages/recorder` |
-| `plan/05-server.md` | `apps/server`, `deploy/openshift` |
-| `plan/06-replay-ui.md` | `apps/replay-ui` |
-| `plan/07-state-plugin.md` | `packages/state-plugin`, `fixtures/apps` |
-| `plan/08-integration.md` | How-to guide for the real workspace |
+| `plan/01-session-replay.md` | **Master:** goal, scope, decisions D1–D40, batches B0–B5, open questions, risks; task X1 |
+| `plan/02-spikes.md` | Performance spike, rrweb gate patch, module-federation spike; tasks K1–K4 |
+| `plan/03-protocol.md` | **Shared contracts:** events, ingest, config, bridge, query API; tasks T1–T2 |
+| `plan/04-recorder.md` | `packages/recorder-engine`, `packages/recorder`; tasks R0–R11 |
+| `plan/05-server.md` | `apps/server`, `deploy/openshift`; tasks S1–S15 |
+| `plan/06-replay-ui.md` | `apps/replay-ui`; tasks U1–U10 |
+| `plan/07-state-plugin.md` | `packages/state-plugin`, `fixtures/apps`; tasks PL0–PL7 |
+| `plan/08-integration.md` | How-to guide for the real workspace; tasks I1–I5 |
 
 A task's `owns:` list is the set of files you may change. If you need to touch anything else,
 stop and ask.
