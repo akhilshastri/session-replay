@@ -25,7 +25,7 @@ Every task comes from a plan file. Start with the master, then your sub-plan:
 
 | Plan | Covers |
 |---|---|
-| `plan/01-session-replay.md` | **Master:** goal, scope, decisions D1–D40, batches B0–B5, open questions, risks; task X1 |
+| `plan/01-session-replay.md` | **Master:** goal, scope, decisions D1–D42, batches B0–B5, open questions, risks; task X1 |
 | `plan/02-spikes.md` | Performance spike, rrweb gate patch, module-federation spike; tasks K1–K4 |
 | `plan/03-protocol.md` | **Shared contracts:** events, ingest, config, bridge, query API; tasks T1–T2 |
 | `plan/04-recorder.md` | `packages/recorder-engine`, `packages/recorder`; tasks R0–R11 |

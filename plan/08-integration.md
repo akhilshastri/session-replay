@@ -102,9 +102,25 @@ If the shell already keeps the user id on another global, set the recorder's `us
 (for example `data-user-path="app.session.staffId"`) instead of copying it.
 
 **2c. Route `/sr/*` to the region's server, ingest port only.** The browser posts to its own
-origin; the host's gateway forwards to the `sr-server` Service's **ingest port 3000** in that
-region (05-L15). Prefer the gateway: by default an OpenShift Route can't claim a host that another
-namespace already owns.
+origin; the host's front proxy forwards to the `sr-server` Service's **ingest port 3000** in that
+region (05-L15). **Your host is fronted by a Node.js proxy** (01 Q38), so add one route there:
+
+```ts
+// Sample — not final code. The host's Node.js proxy (Express + http-proxy-middleware), per region.
+import { createProxyMiddleware } from 'http-proxy-middleware';
+
+app.use('/sr', createProxyMiddleware({
+  target: process.env.SR_INGEST_URL,       // e.g. http://sr-server.sr-nam.svc.cluster.local:3000 (ingest port only)
+  changeOrigin: false,
+  xfwd: true,                              // X-Forwarded-For: limits and quota are per userId + IP
+  proxyTimeout: 30_000,                    // the server acks only after commit (D31)
+  pathRewrite: (path) => `/sr${path}`,     // app.use strips the mount path; keep /sr/ for the server
+}));
+// Register it before any body parser, so the gzip body streams through untouched. Nothing else
+// goes to sr-server: no /api/, no /assets/, no /, and never port 3002.
+```
+
+An nginx front door would use the equivalent block:
 
 ```nginx
 # Sample — not final code. The host's gateway or nginx, in each region.
@@ -222,7 +238,7 @@ export default defineConfig({
 
 | Option | Meaning |
 |---|---|
-| `app` (required) | App name in session metadata and store names (`<app>/redux#<n>`). Use the same name as the remote root's `data-sr-app` (01 Q27) |
+| `app` (required) | App name in session metadata and store names (`<app>/redux#<n>`). Use the same name as the remote in `setMeta({ remotes })` (01 Q27) |
 | `include` / `exclude` | In-house packages under `node_modules` to transform as well, or app files to skip |
 | `denyKeys` | Top-level state keys never published, for volume (market-data slices) |
 | `expectStores` | The build fails if fewer call sites were wrapped |
@@ -286,17 +302,6 @@ Check what the recorder will see, in DevTools on the live app:
   cols: [...new Set([...g.querySelectorAll('.ag-cell[col-id]')].map((c) => c.getAttribute('col-id')))] }));
 ```
 
-**Mark each remote's root too** (proposed in 01 Q27). The element a remote mounts into gets
-`data-sr-app="<name>"`, with the same name as that remote's `srState({ app })`. Clicks and inputs
-then carry `app`, so the replay UI can filter actions by mini-app.
-
-```tsx
-// Sample — not final code. The host mounts a remote into a marked container.
-export const RemoteSlot = ({ name, children }: { name: string; children: React.ReactNode }) => (
-  <div data-sr-app={name} style={{ height: '100%' }}>{children}</div>
-);
-```
-
 ### 4b. Make busy grids cheaper at the source (do this before any rate cap)
 
 When the Hotspots page shows a grid that pauses the recorder, fix the grid first (D32). Each fix
@@ -324,7 +329,7 @@ export class PriceCell implements ICellRendererComp {
 // columnDefs: { colId: 'bid', field: 'bidPx', cellRenderer: PriceCell }
 ```
 
-**2. Cell flash off on the fastest columns.** Flashing adds class and style changes on every tick,
+**2. Cell flash off on the fastest columns** (already off in the pilot app, Q24). Flashing adds class and style changes on every tick,
 so it can double the mutations. Leave `enableCellChangeFlash` off (and don't use the
 `agAnimate…CellRenderer`s) on the market-data columns; keep it where changes are rare and matter.
 
@@ -340,7 +345,7 @@ useEffect(() => {
 }, [node, feed]);   // feed.setPaused(false) applies the latest rows once, then resumes ticking
 ```
 
-**4. Then batch grid updates** to at most a few per second (`applyTransactionAsync`), if the app
+**4. Then batch grid updates** to at most a few per second. The pilot app already conflates its AMPS subscriptions and pushes rows with the viewport datasource's `setRowData` (Q24), so the lever there is a longer conflation interval on the fastest fields; elsewhere `applyTransactionAsync`, if the app
 can.
 
 ### 5. Rate caps and allow-list per region
@@ -390,7 +395,7 @@ The DPIA and the staff notice must be done before stage 1 (D19).
 **Kill switch (D22).** Two routes. Both stop recording without a host redeploy.
 
 *Emergency, about 20 s: the `oc exec` override.* Anyone with `pods/exec` in the region's namespace
-can run it (01 Q35 names who). It writes `ops/override.json` on the server's data volume, which the
+can run it (the central config team, 01 Q35). It writes `ops/override.json` on the server's data volume, which the
 server checks every 5 s; open tabs then stop on their next upload response (within about 5 s
 while recording). The override can only switch recording **off**.
 
@@ -590,19 +595,17 @@ On a branch `sr/dry-run` of the real workspace, against a dev namespace:
 
 ## Open questions
 
-Tracked in 01 as Q35–Q40.
+Answered on 2026-11-10 (01): a **Node.js-based proxy** fronts the host shell and forwards `/sr/*` (Q38, §2c); `window.userId` is already set (Q39); no host CSP (Q39); webpack's built-in MF plugin (Q39); one central team approves and operates config for all regions (Q35); no mini-app marking (Q27); the Node 22 build check runs here in the B5 dry run (Q41).
 
-1. Which internal npm registry and package scope (keep `@sr` or rename)?
-2. Which image registry: the OpenShift internal one or a corporate registry?
-3. What sits in front of the host shell in each region: an nginx gateway, an API gateway, or a plain Route?
-4. Config changes are reviewed ConfigMap edits (about 2 min), plus an `oc exec` override for an emergency kill (about 20 s); there is no admin API. Who may approve an allow-list, cap, hold or kill-switch change in each region, and who holds `pods/exec` for the override out of hours?
-5. Does the host already keep the user id on a global? Which path, for `userIdPath`?
-6. Does the host send a CSP today? If so, `/sr/` and the recorder file need `connect-src` and `script-src 'self'`.
-7. The real versions of React, Redux, AG Grid, flexlayout-react, webpack and Vite in the workspace.
-8. Which 2–3 users and which desk for stage 1, and which region runs the pilot?
+Still open, before B5 (01 Q36, Q37, Q40):
+1. Which internal npm registry and package scope (keep `@sr` or rename), and which image registry?
+2. Storage classes, snapshot classes and object storage per cluster (05).
+3. Which region runs the pilot, and which desk and 2–3 users go first?
+4. The real versions of React, Redux, AG Grid, flexlayout-react, webpack and Vite (read from the workspace in the dry run).
 
 ## Log
 
 - 2026-11-10 — drafted for the plan split (agent)
 - 2026-11-10 — Reviewed and merged into `plan/` by the leader. Aligned with 04 and 07: the loader and recorder bundles in one versioned folder (04-L17), `data-endpoint`, `window.SessionRecorder`, no pre-identify buffer, `srState.webpack()` / `srState.vite()` from `@sr/state-plugin`, the outcome check instead of a plugin-order rule, and `srAttach`.
 - 2026-11-10 — Architect and devil review merged (leader): the gateway proxies `/sr/` to the ingest port 3000 only; the replay UI is on its own hostname and port 3002, with a NetworkPolicy per port (L3, §2c, §7; X15). Kill switch in about 2 min through the ConfigMap and about 20 s through the `oc exec` override, with the command and the lift order; legal holds in the ConfigMap; erasure is the runbook in 05 (§5, §6; A14, X23). The §8 secrets check follows D18's wider list and narrower URL rule, searched in the pod with `grep-day` (X7, X26, X25). New §4b source fixes before rate caps: renderer `refresh()` with `nodeValue`, flash off, hidden-tab grids suspended (D32, A2). Troubleshooting rows for 403 `write-key`, 400 `ui-header`, "screen unknown" bands and a missing gate patch. Body limit 4 MiB to start (X10).
+- 2026-11-10 — Open questions answered (user): Node.js proxy in front of the host; `window.userId`; no host CSP; built-in MF plugin; one central config team; no `data-sr-app` marking; Node 22 check in the B5 dry run.

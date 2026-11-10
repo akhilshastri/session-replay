@@ -103,6 +103,7 @@ export const boot = async () => {
   (07). It runs only on an explicit answer (`enabled: false` or `killSwitch`), and it lasts until
   reload (X13).
 - Host API on `window.SessionRecorder`: `identify`, `report(note?)`, `setMeta({appVersion, remotes})`, `logout()`.
+- `sr:meta` also carries the user's time zone, `tz` (`Intl.DateTimeFormat().resolvedOptions().timeZone`) and `tzOffsetMin`, so the replay can show the user's local time (D42).
 
 ### Sessions, recordings, segments (D29)
 
@@ -838,22 +839,22 @@ on clicks and inputs, the 400/403/429/503 bodies, the asset routes, `sr:net`, `r
 | A full snapshot of 25 mounted grid tabs is too big to send. | Recording stops with a band instead of looping (L19). P1 measures snapshot sizes; the body limit is sized from them, and P1 decides on suspending hidden grids (D32). |
 | Our fetch/XHR wrapper changes how app requests behave. | The original call goes out first, the app gets the same outcome, nothing reads bodies or headers, and the wrapper fails open. Acceptance compares with the unwrapped page. |
 | The URL scrubber masks a business value, or misses a secret. | The narrower D18 rule; `Basic` only when it decodes to `user:password`; Acceptance lists the kept cases (`?state=filled`, `?key=AAPL`, trade ids). |
-| Another replay tool on the page (Sentry, LogRocket) double-patches inputs. | Detect it and refuse to start, with a console note (open question 4). |
+| AMPS WebSocket traffic isn't in the recording (D41). | The screen and Redux capture show its effect; the fetch/XHR wrapper never touches `WebSocket`. |
 | Fractional timestamps could upset a future rrweb. | Golden tests on every bump; recordings stay raw, only replay normalises. |
 | The keepalive tail is lost on a crash. | At most about 8 s of events (5 s seal + 3 s hold-back), and about 1 s after a user action; IndexedDB holds the rest. |
 | A hidden tab that keeps recording costs CPU. | It stops after 10 min (L18); P1 measures hide/show cycles. |
 
 ## Open questions
 
-Tracked in 01 as Q25–Q28 (answers are recorded there first).
-
-1. **No recording before the user id (L2).** Proposed: nothing records until the user id is known, so the login page isn't recorded. OK?
-2. **The queue at logout.** Proposed: on logout, upload that user's queue at once. Whatever can't be sent stays tagged with that user id, uploads when they return, and expires after 72 h. Purge only on `SessionRecorder.logout({ purge: true })`.
-3. **Mini-app of a click (06 Q4).** Proposed: each remote's root carries `data-sr-app="<name>"`, and clicks and inputs get an optional `app`. The names must match the state plugin's `app` and `setMeta({remotes})`, so a `no-state` band can be raised for remotes with no store.
-4. **Another replay tool on the pilot pages?** If yes, the refuse-to-start rule needs a decision.
+All answered by the user on 2026-11-10 (01, Q25–Q28):
+1. **Before the user id (L2):** the app loads only after a successful login, so `window.userId` is set before the recorder starts. Nothing to buffer.
+2. **The queue at logout:** as proposed. Upload that user's queue at once; leftovers stay tagged with the user id, upload at that user's next login on the same browser, and expire after 72 h. Purge only with `SessionRecorder.logout({ purge: true })`.
+3. **Mini-app of a click:** no mini-app filter in the MVP. The recorder doesn't look for `data-sr-app`; `app` on clicks and inputs stays unset (03 keeps it reserved).
+4. **Other tools:** none on the pilot pages, so there is no refuse-to-start rule. The apps use AMPS over WebSockets, which the recorder never wraps or records (D41).
 
 ## Log
 
 - 2026-11-10 — drafted for the plan split (agent)
 - 2026-11-10 — Reviewed and merged into `plan/` by the leader. Contract requests A–G applied in 03. Added L17 (bundle folder vs API base) to line up with 08. Open questions tracked in 01 as Q25–Q28.
 - 2026-11-10 — Architect and devil review merged (leader): `take()` holds back 3 s and clicks are stamped at their event time (L3, X8); bridge `t` used as is, the L4 rebase dropped (A9); seal at 5 s / 1 MiB with per-event encoding, identity per 03-L8 (L8, L9, A10); gate-only rate caps with releases before checkpoint, `stop`, cap change and restart, release before removals, L15 and the emit-level coalescer removed (D23, A3, X6); own fetch/XHR wrapper for `sr:net`, no network plugin and no `blockSelector`, CSRF values blanked in `route()` (L16, A7, X5, A8); masking widened: show-password toggle, `Basic`, URL params anywhere with the narrower rule, more secret key words (D18, X7, X26); per-key state caps with `NotRecorded` placeholders, denied keys, store snapshots after every FullSnapshot, `~2` names, `$root` (L14, X3, X11, X12, X29); the core adopts the queue, kill only on an explicit answer (X13); checkpoints by mutation count and after drops, no UTC-midnight checkpoint, the too-big-snapshot stop (L19, A5, X1, X10, X17); hidden tab records up to 10 min (L18, X9); write key per recording, new session and recording after any 403, `live` marker set again on bfcache restore (L20, X16, X25, X27); tail in IndexedDB plus `sr:close`, IndexedDB failure handling (X19, X22); the full URL rewrite with its inert part in R3 (L13, X14, X27); ReplayEngine `load` of one recording, `append`, `setGaps`, `onUnknown`, `onSeekProgress`, windows starting at a FullSnapshot, `posKey(StreamPos)` (A5, A6, X1, X25, X28); R0 checks added; R7 split into R7a/R7b; R8, R9 and R11 wait for K3, R9 also for K1. Contract request H (`caps-off` note) sent to 03.
+- 2026-11-10 — Open questions answered (user): no pre-login buffering needed; logout queue as proposed; no mini-app tagging; no other tools, WebSockets not recorded (D41); `sr:meta` carries `tz` and `tzOffsetMin` (D42).

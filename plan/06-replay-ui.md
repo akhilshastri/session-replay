@@ -23,8 +23,8 @@ L4, L8, L9, L11, L12, L14.
 | L5 | The **scrubber seeks by raw time**; **action jumps seek by stream position** (D16). Back/next step through the action list's *current filter*. | Positions are exact when many events share a millisecond. The viewer decides what an "action" is. |
 | L6 | The play head is written to the store at most **10 times a second**. `?pos=` is written to the URL **only on pause**, with `replace`. | Smooth playback without flooding React or browser history. |
 | L7 | **State is rebuilt in the UI** from each window's store snapshots plus each action's top-level `changes`, step by step. A `$root` change replaces the whole value. The UI never imports rrweb; it parses only `sr:*` events (03-L1). | D25 keeps rrweb inside `recorder-engine`. Rebuilding forward is cheap; going back restarts from the span's first snapshot. |
-| L8 | **Access is granted per session** (D38) by the server's grant (05-L10: 8 h, or until a server restart). Any 403 `{need:'access'}` shows the prompt. The UI remembers the viewer's name in `localStorage` for prefill; the reason is never stored. | Saves typing without weakening the "say why for each open" rule. |
-| L9 | Times show in the **viewer's local time** with UTC on hover. The day filter is a **UTC day**, labelled as such. | Day files are UTC (D31); support staff think in local time. See open question 1. |
+| L8 | **One grant per browser** (D38; user, Q30, Q31): the first session open asks for a name and reason, and that grant covers every session opened in this browser for 8 h (05-L10), or until a server restart. The session list needs no prompt. Any 403 `{need:'access'}` shows the prompt. The UI remembers the viewer's name in `localStorage` for prefill; the reason is never stored. | Saves typing without weakening the "say why for each open" rule. |
+| L9 | Times show in the **recorded user's local time** (`sr:meta.tz`; user, Q29, D42), with UTC on hover. Without a `tz`, the UI falls back to UTC and says so. The day filter is a **UTC day**, labelled as such. | Support works from what the user reports ("it happened at 9:05"); UTC on hover matches server logs. |
 | L10 | Small, proven libraries: `@tanstack/react-virtual` (long lists), `microdiff` (Diff tab). A hand-written JSON tree (lazy, collapsed by default). | Large action lists and 2 MB stores must not freeze the page. |
 | L11 | Until the server's query API lands (B3), the UI runs on a **mock Hono API** in `apps/replay-ui/mock/`, built from the 03 fixtures (including the framed `chunks-v1.bin`) and checked against the 03 zod schemas. | Lets B2 start in parallel with the server, against the same shapes. |
 | L12 | **Every `t` is raw client time** (03-L12): the API's times, the engine's ticks, bands and notes. The UI shows `t + recording.clockOffsetMs` and seeks by raw `t`. | A per-chunk skew correction jitters and isn't monotonic; mixing corrected and raw times would put markers minutes off (devil X2). |
@@ -339,7 +339,7 @@ export const usePlayerStore = create<PlayerState & PlayerActions>()((set) => ({
 }));
 ```
 
-Panel choices (action kinds, mini-app, search text, state tab, selected store) live in a second
+Panel choices (action kinds, search text, state tab, selected store) live in a second
 small `usePanelStore`, so a play-head tick never re-renders the filters. Components read with
 selectors (`usePlayerStore((s) => s.status)`), or `useShallow` for several fields.
 
@@ -747,7 +747,7 @@ The 2026-11-10 contract requests (C1–C14) are all in 03 and 04 now. What the U
 - [ ] A client clock 5 min off: markers, bands, the action list and the scrubber line up with the screen; labels show `t + clockOffsetMs` (devil X2).
 - [ ] The rate-cap legend shows the config version and capped columns, or "No rate caps". A mid-session change shows both versions.
 - [ ] Every session shows "identity: client-asserted" and "unchanged since received". A chunk with a failed hash check shows a red note and its band, and its events are never played.
-- [ ] Action list: filters by kind and mini-app, failed requests in red, a click seeks by position, the list follows the play head until the user scrolls, and 10,000 rows scroll smoothly. State and request rows come from the loaded span, merged with the API's rows by position with no duplicates.
+- [ ] Action list: filters by kind (no mini-app filter in the MVP, Q27), failed requests in red, a click seeks by position, the list follows the play head until the user scrolls, and 10,000 rows scroll smoothly. State and request rows come from the loaded span, merged with the API's rows by position with no duplicates.
 - [ ] State panel: Action / Diff / State are correct at any position (store snapshots + actions), with a store picker. `$root` stores, deny-listed and capped keys (`NotRecorded`), the no-store and `no-state` cases show correctly; inside an unknown band the panel says its state may be out of date.
 - [ ] An 8-hour busy session fetches only the windows it plays (the current one and the next). A seek finishes in under 2 s; on the busiest desk it may take longer, with the progress bar after 300 ms (user, 2026-11-10). At most 3 windows stay in memory. Playback crosses a window edge with no rebuild and no flash, showing "Buffering…" only if the next window hasn't arrived.
 - [ ] A framed chunk response, including an `unreadable` chunk with 0 bytes and a response cut by `next`, loads through `readChunks` and `DecompressionStream` (the mock serves `chunks-v1.bin`).
@@ -786,18 +786,17 @@ inside each task's `owns:`.
 | Rebuilding a 2 MB store on every tick. | Incremental `stateAt`, render ≤ 4×/s, collapsed tree. A worker later if needed (CSP allows same-origin workers). |
 | The D30 CSP blocks the UI's own images and fonts (only `/assets/` and `data:` are allowed). | Icons and fonts inlined, a `data:` favicon; `bun run preview` and U10 check for violations. |
 | The mock drifts from the real server. | The mock is validated by the same zod schemas and serves 03's `chunks-v1.bin`; U10 switches to the real type. |
-| UTC days confuse APAC staff. | Labels, local times with UTC on hover; open question 1. |
+| UTC days confuse APAC staff. | Labels; times in the recorded user's local time with UTC on hover (D42). |
 | Old engines or iframes leak when switching sessions. | `destroy` plus the `gen` guard; a heap check in acceptance. |
 
 ## Open questions
 
-Tracked in 01 as Q27 and Q29–Q32.
-
-1. Times: show the viewer's local time (proposed), UTC, or the recorded user's time zone?
-2. 05 proposes an 8 h grant per session, so a reload within it skips the prompt. Is 8 h right for audit, or should each new browser tab ask again?
-3. Should the session list itself need a name and reason? Proposed: no; it is logged as a search.
-4. Mini-app filter: clicks need an `app` field (C4). How does the recorder know a click's mini-app (for example a `data-sr-app` attribute on each remote's root)? For 04.
-5. Hotspots default day: yesterday (proposed) or today?
+All answered by the user on 2026-11-10 (01, Q27, Q29–Q32):
+1. **Times:** the **recorded user's local time** (from `sr:meta.tz`), with UTC on hover (D42).
+2. **Access:** one name + reason covers every session opened in that browser for 8 h (D38).
+3. **Session list:** no prompt; searches are logged.
+4. **Mini-app filter:** not in the MVP.
+5. **Hotspots:** opens on yesterday.
 
 ## Log
 
@@ -813,3 +812,4 @@ Tracked in 01 as Q27 and Q29–Q32.
   rows built locally, `$root` in `stateAt` (A11, X12); a progress bar for long seeks (A5, user); the
   Bun build must not write under `assets/` (X28); U4 split into U4a and U4b; U10 depends on R3
   (X27); access prompt lengths follow `AccessReq`.
+- 2026-11-10 — Open questions answered (user): recorded user's local time with UTC on hover (D42); one prompt per browser for 8 h covering all sessions (D38); no prompt for the list; no mini-app filter in the MVP; Hotspots opens on yesterday.

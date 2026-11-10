@@ -104,7 +104,7 @@ export const NotRecorded = z.object({ $sr: z.literal('not-recorded'), why: z.enu
 
 export const SrPayload = {
   'sr:click':    z.object({ label: z.string(), selector: z.string(),
-                            app: z.string().optional() }),                   // data-sr-app of the closest remote root
+                            app: z.string().optional() }),                   // reserved: no mini-app filter in the MVP (01 Q27)
   'sr:input':    z.object({ field: z.string(), value: z.string(),          // secrets → '****' (D18)
                             app: z.string().optional() }),
   'sr:nav':      z.object({ url: z.string() }),                              // token params stripped
@@ -127,6 +127,8 @@ export const SrPayload = {
     remotes: Rec(z.string()).optional(),                                     // remote name → entry URL
     libs: Rec(z.string()).optional(), pipeline: z.enum(['main', 'worker']),
     userAgent: z.string(), viewport: z.object({ w: z.number(), h: z.number() }),
+    tz: z.string().optional(),                                               // IANA zone, e.g. 'Asia/Tokyo' (D42)
+    tzOffsetMin: z.number().optional(),                                      // UTC offset at recording start
   }),
   'sr:rate-caps': z.object({ configVersion: z.string(), caps: Rec(Rec(z.number())) }), // D36 legend
   'sr:net':      z.object({ method: z.string(), url: z.string(),            // token params stripped
@@ -316,7 +318,7 @@ Served on the replay UI port, never on the ingest port (05). Every `/api/*` requ
 |---|---|
 | `GET /api/sessions?user=&day=yyyymmdd&hasErrors=1&limit=50&cursor=` | `SessionPage`, newest first. `day` matches every session that **touches** that UTC day |
 | `GET /api/sessions/:id` | `SessionDetail` |
-| `POST /api/access` (`AccessReq`) | 204 + the `sr_viewer` cookie and an 8 h grant for that session; logged (D38, 05-L10) |
+| `POST /api/access` (`AccessReq`) | 204 + the `sr_viewer` cookie and an 8 h grant for **that browser**, covering every session opened in it; logged (D38, 05-L10) |
 | `GET /api/sessions/:id/actions?kinds=click,input&after=&to=&failedOnly=1&limit=1000` | `ActionPage` |
 | `GET /api/sessions/:id/chunks?from=<posKey>&to=<posKey>&cursor=` | the framed chunk response below |
 | `GET /api/hotspots?day=yyyymmdd&app=` | `HotspotRow[]` for the Hotspots page (D32) |
@@ -376,7 +378,8 @@ export const SessionDetail = SessionSummary.extend({
 });
 
 export const AccessReq = z.object({
-  sessionId: z.string(), name: z.string().min(2).max(80), reason: z.string().min(3).max(200),
+  sessionId: z.string().optional(),                     // the session being opened, for the log; the grant covers all (D38)
+  name: z.string().min(2).max(80), reason: z.string().min(3).max(200),
 });
 
 export const ActionKind = z.enum(['click', 'input', 'nav', 'error', 'net', 'fidelity', 'report', 'hotspot']);
@@ -384,7 +387,7 @@ export const ActionRow = z.object({
   pos: StreamPos, t: z.number(), kind: ActionKind,
   name: z.string(), summary: z.string(),
   failed: z.boolean().optional(),                         // net: status 0 or ≥ 400 (only failed net rows are stored); errors
-  app: z.string().optional(),                             // the mini-app of a click or input
+  app: z.string().optional(),                             // reserved; not filled in the MVP (01 Q27)
 });
 export const ActionPage = z.object({ items: z.array(ActionRow), next: PosKey.nullable() }); // next → `after`
 
@@ -503,3 +506,4 @@ Every package tests against these fixtures, so parallel work meets at the same s
   `sr:close`, `chunk-unreadable`, `no-clean-close` and gap bands that run to the next full snapshot
   (X1, X19); `no-state` rule; `checkpointMutations` (A5); 5 s cadence (A10); limits derived from
   P1 (A1).
+- 2026-11-10 — Open-question answers (user): `sr:meta` gains `tz` and `tzOffsetMin` for the recorded user's local time (D42); the viewer grant covers every session in that browser for 8 h, so `AccessReq.sessionId` is optional (D38); `app` on clicks, inputs and action rows is reserved, not filled in the MVP (Q27).

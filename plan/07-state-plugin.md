@@ -60,7 +60,7 @@ flowchart LR
 ```ts
 // Sample — not final code. packages/state-plugin/src/options.ts
 export type StatePluginOptions = {
-  app: string;                       // required; same name as data-sr-app and setMeta remotes (04 Q3)
+  app: string;                       // required; same name as the remote in setMeta({ remotes })
   include?: (string | RegExp)[];     // packages under node_modules to transform as well
   exclude?: (string | RegExp)[];     // app files to leave alone
   denyKeys?: (string | RegExp)[];    // top-level state keys never recorded (volume, L4)
@@ -346,7 +346,7 @@ export const srState = createUnplugin(factory);
 
 | App | Stack | Plugin | Redux | What it proves |
 |---|---|---|---|---|
-| `host-webpack-r17` | React 17, webpack 5, MF host (open question 1) | yes, `expectStores: 1` | 4.2.1, shared singleton, eager | Creates its store at module load, before the probe (the recorder stand-in) loads. Mounts each remote into its own `data-sr-app` container. |
+| `host-webpack-r17` | React 17, webpack 5, MF host with webpack's built-in `ModuleFederationPlugin` (as in the real host, Q39) | yes, `expectStores: 1` | 4.2.1, shared singleton, eager | Creates its store at module load, before the probe (the recorder stand-in) loads. |
 | `remote-vite-r18` | React 18, Vite 7, `@module-federation/vite` | yes | `^4.2.1` singleton, `redux-thunk`, `redux-saga` | Thunk and saga actions; a lazy slice added with `replaceReducer`; a file with only `import type` from `redux`. |
 | `remote-vite-r19` | React 19, Vite 7 | yes, `include: ['@fixture/store-kit']` | built against 5.0.1, `requiredVersion: false`, so it runs the host's 4.2.1 | Runtime feature checks; a store created inside a package under `node_modules`. |
 | `remote-plain` | React 18, Vite 7 | **no** | singleton | Sharing still works; nothing is captured from it. |
@@ -432,7 +432,7 @@ export const srState = createUnplugin(factory);
 - [ ] **PL5 Fixtures: host, r18 remote, probe** — owns: `fixtures/apps/{host-webpack-r17,remote-vite-r18,shared/bridge-probe}/**` — batch: B4 — depends on: PL2, PL4 — done when: `bun run fixtures:build` builds both apps, and type-check passes for them.
 - [ ] **PL6 Fixtures: r19 remote, plain remote, store-kit** — owns: `fixtures/apps/{remote-vite-r19,remote-plain,shared/store-kit}/**` — batch: B4 — depends on: PL5 — done when: `bun run fixtures:build` builds all four apps and the packed `store-kit` installs under `node_modules`.
 - [ ] **PL7 Fixture e2e specs** (qa, `specs` mode) — owns: `fixtures/apps/e2e/**` — batch: B4 (alongside PL5–PL6) — depends on: the Acceptance list above — done when: the specs compile. They first run at the gate.
-- [ ] **Node 22 fixture build** (L12, 01 Q41) — the leader runs `fixtures:build` once with a portable Node 22 (not on PATH) — batch: B4, after PL6 and before B5 — depends on: Q41 answered yes — done when: it passes, or the difference from Bun is logged here.
+- [ ] **Node 22 fixture build** (L12, 01 Q41) — runs in the B5 dry run on the real-workspace machine, where Node 22 is installed (08 I4); nothing to do here — done when: the dry-run report records a clean `fixtures:build` (or the real apps' builds) under Node 22.
 - Real-workspace integration (webpack 5 host, Vite 7 remotes): B5, in 08.
 
 ## Risks
@@ -452,12 +452,12 @@ export const srState = createUnplugin(factory);
 
 ## Open questions
 
-Tracked in 01 as part of Q39 (needed for B5), and Q41 (Node 22 for one fixture build).
-
-1. Which MF plugin does the real webpack host use: webpack's built-in `container.ModuleFederationPlugin` or `@module-federation/enhanced`? The fixture host should match it.
-2. Which top-level slices hold market data in the pilot app, so they go in `denyKeys`?
-3. Does any pilot code create stores through CommonJS, namespace imports or a shared library? Those need `srAttach` or `include`.
-4. Is `redux` shared as a singleton across all pilot remotes, and are they on the same major (4 or 5)?
+Answered on 2026-11-10 (01, Q39, Q41):
+1. The webpack host uses webpack's **built-in** `container.ModuleFederationPlugin`; the fixture host uses it too.
+2. Market data is **not in Redux** (AMPS feeds the grids directly), so the pilot needs no `denyKeys`. The option stays for other apps.
+3. App code uses plain `import { createStore } from 'redux'`; no CommonJS, namespace imports or shared store library.
+4. `redux` 4.x is shared as a singleton across the remotes. A few apps use Redux Toolkit slices with their own store and Provider; the MVP stays plain Redux (D39), so a store made with RTK's `configureStore` isn't captured and shows a `no-state` band.
+5. Node 22 is available on the real-workspace machine; the Node 22 fixture build runs there in the B5 dry run, not here.
 
 ## Log
 
@@ -470,3 +470,4 @@ Tracked in 01 as part of Q39 (needed for B5), and Q41 (Node 22 for one fixture b
   `getState()` itself (A9, X3, X12, X13; 03-L11 replaces request G); `denyKeys` also go to the
   recorder in `meta.deny`; the recorder de-duplicates store names (X29); a no-`Bun.*` guard and one
   Node 22 fixture build (A16, Q41); PL2–PL4 move to B2 (01 Batches).
+- 2026-11-10 — Open questions answered (user): built-in MF plugin; no market data in Redux; plain imports; Redux 4 singleton; RTK `configureStore` apps not captured in the MVP; the Node 22 check moves to the B5 dry run on the real-workspace machine.

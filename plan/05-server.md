@@ -27,7 +27,7 @@ Inherited: D12, D13, D18, D20, D21, D22, D26, D27, D28, D29, D30, D31, D32, D33,
 | L7 | **No `segments` table.** The day file has a small `marks` table (seek anchors, `sr:meta`, `sr:rate-caps`, `sr:asset`, `sr:close`). `master.db` has `session_files`, `session_days` and `snapshots`. | `IngestBatch` has no segment field. Readers need the file map and the seek anchors. A rebuild reads `marks` and `actions`, so it never inflates a chunk. |
 | L8 | **Config is a ConfigMap-mounted JSON file** with the kill switch, allow-list, rate caps and **legal holds** (D22). The server checks it every 15 s; with the kubelet's sync, a change reaches running tabs in **about 2 min**.<br>**Emergency kill:** an override file `ops/override.json` in the data dir, written with `oc exec` (L9) and checked every 5 s, stops recording in **about 20 s**. It can only switch recording **off**. | The MVP has no login (D38), so an admin endpoint would let anyone on the internal network switch recording off or lower rate caps. ConfigMap edits go through Git review and cluster RBAC. The override skips Git review, so it may only do the safe thing. It lives on the PVC, so it survives a restart. |
 | L9 | **No admin listener. Admin work is a CLI run with `oc exec … bun apps/server/src/cli.ts <cmd>`.** The CLI never opens a database: it writes a **request file** into `ops/requests/`, and the running server picks it up, runs it through the normal write path, and writes a result file the CLI prints. | **Why request files, not "stop the server":** the server is the only writer of its files, so the CLI must go through it. Stopping it would stop ingest for the whole region (one replica), and a stopped pod can't be reached with `oc exec`: you'd need to scale to 0 and attach the RWO volume to a debug pod. With request files, ingest keeps running, every rule (holds, append-only log, one writer) still applies, and cluster RBAC (`pods/exec`) stays the gate. |
-| L10 | **Viewer grant:** a signed cookie `sr_viewer={vid,name}` plus an in-memory grant per (vid, session), created by `POST /api/access`. A grant lasts 8 h or until the server restarts. | Meets D38 (a name and reason for each open) without a login. A restart only costs a re-prompt. |
+| L10 | **Viewer grant:** a signed cookie `sr_viewer={vid,name}` plus an in-memory grant per `vid` (one browser), created by `POST /api/access`. One grant covers **every session** opened in that browser for 8 h or until the server restarts (user, Q30); each open and chunk fetch is still logged under that grant's name and reason. | Meets D38 (a self-entered name and reason, every access logged) without a login. A restart only costs a re-prompt. |
 | L11 | **Limits and the quota are derived from P1's measured bytes per minute** (02; architect A1). The starting defaults below are **provisional** until P1 reports:<br>• body 4 MiB, sized from P1's full-snapshot sizes (devil X10); gunzip output 16 MiB;<br>• per userId + IP: 20 req/s with a burst of 100, and 8 MiB/min (about 3× P1's busiest scenario, once measured);<br>• **daily quota: a fuse at about 3× a busy user's day** (P1's S2 gzip bytes/min × 60 × 8 h × 3), keyed on **userId + IP** (devil X16). Until P1 reports: 500 MB/day;<br>• global `503` + `Retry-After` when the writer queue is over 64 MiB or free disk is under `SR_MIN_FREE_BYTES`. | Limits that sit below real traffic cut audit data. The first sizing assumption and the architect's estimate differ 15–70×, so the numbers must come from P1. Keying on userId + IP means a flood under one userId from another IP can't use up the real user's quota. |
 | L12 | **Pinned versions:**<br>• `hono` 4.13.x with `@hono/bun` 1.0.x, not hono 5 (still an rc);<br>• `zod` 4.6.x, `@hono/zod-validator` 0.9.x;<br>• `pino` for logs, `prom-client` for metrics.<br>Each is pinned to the newest release that is at least 2 weeks old. | `hono/bun` is deprecated in 4.13 in favour of `@hono/bun`, so the later move to v5 stays small. |
 | L13 | **The UI CSP is D30's, word for word**, on `/` and every SPA route. It lives in one constant, and a test compares it with D30. | The about:blank replay iframe inherits it. A drift between plan and server would quietly re-open live requests. |
@@ -107,7 +107,7 @@ flowchart LR
 | Route | Caller | Notes |
 |---|---|---|
 | `GET /api/sessions` | UI | From `master.db`. Logged as `search`. |
-| `POST /api/access` | UI | `{sessionId, name, reason}` → 204, plus the cookie and a grant (L10). Logged as `open`. |
+| `POST /api/access` | UI | `{name, reason, sessionId?}` → 204, plus the cookie and a browser-wide grant (L10). Logged as `grant`; each later session open is logged as `open`. |
 | `GET /api/sessions/:id`, `…/actions`, `…/chunks` | UI | Need a grant, or they return 403 `{need:'access'}` and log a `denied` row. |
 | `GET /api/hotspots?day=&app=` | UI | Aggregation, see below. |
 | `GET /assets/:sha256` | replay iframe | The route only matches `[a-f0-9]{64}`. Immutable cache headers plus L14. |
@@ -889,20 +889,17 @@ Every slice is done when `bunx tsc --noEmit -p apps/server` passes and `bun test
 
 ## Open questions
 
-Tracked in 01: Q1–Q6 as Q36–Q38, Q7 as Q33, Q9 as Q34. Q8 is resolved: the limits are derived from P1 (L11, architect A1).
+Answered on 2026-11-10 (01): one retention class of 30 days (Q33); crypto-shredding off for the pilot, so erasure uses the rewrite runbook (Q34); one central team approves and operates config for all regions (Q35); the "config fetches dropped to zero" alert uses 08:00–18:00 local time, Mon–Fri, per region, adjustable in config (Q42). Key escrow matters only if D27 is turned on later.
 
+Still open, needed before B5 (01 Q36, Q37):
 1. Which image registry, and how are images promoted per region (NAM/APAC/EMEA)?
-2. Which block storage class and VolumeSnapshotClass does each cluster have? Should snapshots be scheduled by a CronJob or by OADP/Velero?
-3. Is there object storage for copies of closed day files and for the daily `control.db` and audit copies (X21)? If not, which second volume?
-4. Do the host gateways proxy `/sr/*` to the Service, and which header carries the client IP?
-5. Which support-network CIDRs go on the Route allow-list?
-6. Where is the master key escrowed outside the cluster, and who holds it? What are each region's business hours for the config-fetch alert?
-7. Is there a SIEM target for access rows, or are stdout logs enough?
-8. Is the single `std` class (30 days) right for v1?
-9. Turn crypto-shredding on for the pilot? Data written while it's off can't be shredded later.
+2. Which block storage class and VolumeSnapshotClass does each cluster have? CronJob or OADP/Velero for snapshots?
+3. Is there object storage for copies of closed day files and for the daily `control.db` and audit copies? If not, which second volume?
+4. Which support-network CIDRs go on the replay UI Route's allow-list, and is there a SIEM target for access rows (or are stdout logs enough)?
 
 ## Log
 
 - 2026-11-10 — drafted for the plan split (agent)
 - 2026-11-10 — Reviewed and merged into `plan/` by the leader. C1–C6 applied in 03; C7, C8 and the L2/L8/L9 changes applied in 01 (D21, D22, D30, Server summary); C9 is in 06. `sentAt` now arrives in the `X-SR-Sent-At` header (03-L7); the body no longer has it.
 - 2026-11-10 — Architect and devil review merged (leader): one `writer` worker, main-thread reads, short-lived job Workers, the resident `jobs` worker only as a fallback (L1; A12, X17); holds in the ConfigMap, `control.db` keeps wrapped keys and subjects (L2; A14); identity = hash of the decoded body, gzip stored as received, integrity over the stored bytes, framed chunk response, first row per seq with `dups` (L4; A4, X16); LRU prefix de-dup preloaded before `decide()` (L5; X18); no late files (L6; A13); no admin listener: a request-file CLI and an `oc exec` override file, about 2 min / 20 s (L8, L9; A14, X23); limits and the quota derived from P1, quota on userId + IP, 4 MiB body to start (L11; A1, X10, X16); two ports with a Host check and a NetworkPolicy each (L15; X15); write key (L16); `X-SR-UI` (L17); `session_days` (L18; X17); raw times and `clockOffsetMs` (L19; X2); lean schema with `marks`, sparse actions, gaps, server-made bands and the `no-clean-close` note (A11, X1, X19, X25); `grep-day` helper (X25); silent-recorder alerts (X20); off-PVC backups, key escrow and a restore drill (X21); S3 and S5 split, S9 reshaped, ownership overlaps removed, the UI built with Bun (A15, X27, X28).
+- 2026-11-10 — Open questions answered (user): one 30-day class; crypto-shredding off for the pilot; one central config team; alert business hours 08:00–18:00 local Mon–Fri. The viewer grant now covers every session in that browser for 8 h (D38, Q30).

@@ -83,7 +83,9 @@ bun patch --commit node_modules/@rrweb/record   # writes patches/@rrweb%2Frecord
 - flexlayout-react with 10–25 grid tabs; visible and visited tabs are mounted;
 - 4 busy AG Grids of up to 100 rows, open all day;
 - per row, up to 4 market-data cells at 4 ticks/s, and up to 6 slower cells at about 1/s (*assumption*);
-- ≈ 3,100 cell changes/s with about 35 rows rendered, ≈ 8,800/s with all 100 rendered, and cell flash adds 2–3 attribute mutations per change.
+- ≈ 3,100 cell changes/s with about 35 rows rendered, ≈ 8,800/s with all 100 rendered (upper bounds);
+- **how ticks arrive** (user, Q24): most grids use AG Grid's **Viewport Row Model**. A viewport datasource calls `params.setRowData()` for each AMPS message, and the AMPS subscriptions are **conflated**, so the real rate per cell may be lower than 4/s. **No cell flash.** Only the rows in the viewport are rendered and updated;
+- what the datasource does while its tab is hidden (keeps the viewport subscription or not) is checked against the real app in K2.
 
 **Scenarios:**
 
@@ -98,7 +100,6 @@ bun patch --commit node_modules/@rrweb/record   # writes patches/@rrweb%2Frecord
 - **source fixes** (D32, architect A2), each with `full`, and all three together:
   - a cell renderer whose `refresh()` sets an existing Text node's `nodeValue` (one small
     characterData record per change, instead of a childList remove + add);
-  - cell flash off on the fast (market-data) columns;
   - grids in hidden flexlayout tabs suspended (no DOM updates while hidden, one refresh on show);
 - **D36 rate caps through the gate** (D23): 1 / 2 / 4 states/s on the market-data columns, with a
   release at every click and key press. These need K1;
@@ -115,9 +116,9 @@ bun patch --commit node_modules/@rrweb/record   # writes patches/@rrweb%2Frecord
   10-min limit) by bringing a second tab to the front, and flexlayout tab switches every 20 s.
 
 **Run matrix** (keeps K3 to about a day of machine time, plus the soak):
-- every variant at S2 (real tick rate, flash as the real app has it), unthrottled and at 4× CPU
+- every variant at S2 (real tick rate, no flash, as in the real app), unthrottled and at 4× CPU
   throttling;
-- the tick-rate sweep (½×, 1×, 2×) and flash on/off for recorder off and `full`, at S1, S2 and S3;
+- the tick-rate sweep (½×, 1×, 2×) for recorder off and `full`, at S1, S2 and S3 (the conflation interval sets 1×; measure it from the real feed if possible);
 - S1 and S3 also for the best source-fix combination and the chosen caps;
 - 5 min × 3 per cell, median. An **8-hour soak** of S2 with `full`.
 
@@ -125,8 +126,9 @@ The harness loads the recorder from a bundle path (`--bundles <dir>`), so K5 can
 built bundles without changing harness code.
 
 ```ts
-// Sample — not final code: a seeded ticker that mimics the real tick profile (L2, L4).
-import type { GridApi } from 'ag-grid-community';
+// Sample — not final code: a seeded, conflated ticker feeding a viewport datasource, the way the
+// real app's AMPS subscriptions feed its grids (Q24). Only rows inside the viewport are pushed.
+import type { IViewportDatasource, IViewportDatasourceParams } from 'ag-grid-community';
 
 const mulberry32 = (seed: number) => () => {           // tiny deterministic RNG
   seed |= 0; seed = (seed + 0x6d2b79f5) | 0;
@@ -138,18 +140,25 @@ const mulberry32 = (seed: number) => () => {           // tiny deterministic RNG
 const FAST = ['bid', 'ask', 'mid', 'last'];            // 4 ticks/s
 const SLOW = ['execQty', 'notional', 'total', 'pnl', 'avgPx', 'filled']; // ~1 tick/s (assumption)
 
-export const startTicker = (api: GridApi, rows: number, rate = 1, seed = 42) => {
+export const tickingDatasource = (rows: number, rate = 1, seed = 42): IViewportDatasource => {
   const rnd = mulberry32(seed);
-  const fastEvery = 250 / rate;                         // 4/s at rate 1
-  const fast = setInterval(() => {
-    const update = Array.from({ length: rows }, (_, i) => ({
-      id: `r${i}`, ...Object.fromEntries(FAST.map((c) => [c, +(100 + rnd() * 5).toFixed(2)])),
-    }));
-    // Replace with the real app's method once Q24 is answered (setDataValue vs transactions).
-    api.applyTransaction({ update });
-  }, fastEvery);
-  const slow = setInterval(() => { /* same for SLOW columns at 1/s × rate */ }, 1000 / rate);
-  return () => { clearInterval(fast); clearInterval(slow); };
+  let params: IViewportDatasourceParams | undefined;
+  let first = 0, last = -1;                               // the rows AG Grid shows right now
+  let timers: ReturnType<typeof setInterval>[] = [];
+  // One "AMPS message" = one conflated update for one row; each one calls setRowData (Q24).
+  const push = (cols: string[]) => {
+    for (let i = first; i <= last && i < rows; i++) {
+      const row = { id: `r${i}`, ...Object.fromEntries(cols.map((c) => [c, +(100 + rnd() * 5).toFixed(2)])) };
+      params?.setRowData({ [i]: row });
+    }
+  };
+  return {
+    init: (p) => { params = p; p.setRowCount(rows);
+      timers = [setInterval(() => push(FAST), 250 / rate),   // 4/s at rate 1 (or the conflation interval)
+                setInterval(() => push(SLOW), 1000 / rate)]; },
+    setViewportRange: (f, l) => { first = f; last = l; push([...FAST, ...SLOW]); },
+    destroy: () => timers.forEach(clearInterval),
+  };
 };
 ```
 
@@ -315,7 +324,7 @@ scenarios as K3, with the defaults K3 chose (caps, worker, checkpoints).
 
 | Risk | Mitigation |
 |---|---|
-| The ticker doesn't match the real app's update method, so the numbers mislead. | Q24 before K2; mirror the real code path. |
+| The ticker doesn't match the real app's update method, so the numbers mislead. | Q24 answered: viewport row model, `setRowData` per conflated AMPS message, no flash; K2 mirrors it and measures the real conflation interval if possible. |
 | A Windows desktop throttles a background Chrome window, skewing timings (seen in the 0002 spike). | Run in a dedicated, visible, focused window; repeat ×3 and take the median. The hide/show cycles hide the tab on purpose and are measured separately. |
 | An 8-hour soak blocks the dev machine. | Run it overnight, in the background, outside agent runs. |
 | Bytes per minute come out far above the first assumption (the architect estimates 1.5–7 MB/min gzip per busy user at S2). | Bytes are a headline result (L6); the decision rules size the quota and PVC from them, and the source fixes and caps come before more storage (D32, Q19). |
@@ -325,7 +334,7 @@ scenarios as K3, with the defaults K3 chose (caps, worker, checkpoints).
 
 ## Open questions
 
-- **Q24:** how does the real app push ticks into AG Grid: `applyTransaction`, `applyTransactionAsync`, `rowNode.setDataValue`, or replacing `rowData`? And is cell flash on?
+- **Q24:** answered (user, 2026-11-10): viewport row model, `params.setRowData()` per conflated AMPS message, no cell flash. The ticker sample above follows it.
 
 ## Log
 
@@ -338,3 +347,4 @@ scenarios as K3, with the defaults K3 chose (caps, worker, checkpoints).
   plus an exported `mutationGateVersion` (D23, X6); one rrweb pin chosen at B0 start (X24); K1, K2
   and K4 run in parallel; new K5 re-runs P1 on the built bundles (X24); the P1b sample follows
   07-L1 (X28); a run matrix keeps K3 to about a day.
+- 2026-11-10 — Q24 answered (user): the P1 workload now feeds a viewport datasource with `setRowData` per conflated AMPS message; no cell flash, so the flash variants are gone; K2 checks what the datasource does while its tab is hidden.
