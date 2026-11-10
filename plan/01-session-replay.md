@@ -94,8 +94,8 @@ IDs are kept stable across revisions so reviews can refer to them.
 | D40 | **Repo tooling for the baseline:** Biome (one root `biome.json`) for lint and format; `bun test` for unit tests, with a happy-dom preload for browser packages and `fake-indexeddb` for the queue; Playwright (through `bunx`) for e2e, tagged by area. Each is pinned to the newest release at least 2 weeks old. Set up by the B1 root scaffold (X1). | One fast tool per job, all runnable with Bun, so tier-1 checks stay cheap for every slice. | leader |
 | D41 | **WebSocket traffic is not recorded** (user, 2026-11-10, Q28). The apps receive market data over AMPS WebSockets; the recorder never wraps `WebSocket`. What the data does is captured by the screen recording (and by Redux where it lands there). No other replay or monitoring tool runs on the pilot pages. | The UI is recorded exactly (D16), so the raw feed adds volume and cost without audit value. | user |
 | D42 | **The replay shows the recorded user's local time**, with UTC on hover (user, 2026-11-10, Q29). The recorder adds the user's IANA time zone and UTC offset to `sr:meta`; the UI shows `t + clockOffsetMs` in that zone. | Support works from what the user reports ("it happened at 9:05"). UTC on hover matches server logs. | user |
-| D43 | **Console capture in v1** (user, 2026-11-10). Every level can be recorded (`error`, `warn`, `info`, `log`, `debug`). Only `error` and `warn` are on by default; the others are switched on per region in config (`console.levels`). The recorder wraps those console methods and calls the original first with the same arguments. Each line is cut to about 2 KB, passes the D18 scrubber, folds repeats into a `count`, and is rate-limited. It becomes an `sr:console` event, shown as a row in the replay's action list with a level filter; `console.error` lines also count toward the session's error badge. | Errors caught by a React error boundary, and errors the app logs itself (AMPS client, handled fetch failures), never reach `window.onerror`, so `sr:error` alone misses them. | user |
-| D44 | **Cross-session analytics: infrastructure in MVP2, not v1** (user, 2026-11-10; plan [09](09-analytics.md)). The server derives facts from each upload at ingest (architect option c) into `analytics.db`: raw facts for 30 days, daily summaries for 13 months, and a backfill job. Tabs are read from the page with config selectors into a built-in `$dom` store (labels; open and visible). Only recorded users are covered. A query API and CLI run saved query specs; the query page comes later. Who may query is decided at MVP2 start, with the DPIA update. v1 adds only console capture (D43), and ingest walks each batch once so `extract()` can plug in later. | The tool grows from support replay into usage and error analytics without a second pipeline, without extra browser work, and without a recorder release per new question. | user, architect |
+| D43 | **Console capture in v1** (user, 2026-11-10). Every level can be recorded (`error`, `warn`, `info`, `log`, `debug`); only `error` and `warn` are on by default, and the others are switched on per region in config (`console.levels`). Console capture **follows the record/replay rules** (user): only recorded users; the same config, allow-list and kill switch; the same 30-day retention; no separate expiry. The recorder wraps only the enabled methods and calls the original first. **Its cost is bounded:** the rate limit runs before any formatting, the formatter stops at the size cap (about 2 KB), and while recording is paused calls pass straight through. **Secrets are masked:** secret-named keys inside logged objects (`isSecretKey`), a token cut by the size cap, and URL passwords; then the pipeline scrubber runs, as for every event. Lines become `sr:console` events, shown as rows in the replay's action list with a level filter. The session's ⚠ badge counts uncaught errors plus `console.error` lines, and an error seen by both counts once. Console capture is named in the DPIA and staff notice before the pilot. | Errors caught by a React error boundary, and errors the app logs itself (AMPS client, handled fetch failures), never reach `window.onerror`, so `sr:error` alone misses them. | user; review fixes (devil B1, B2) |
+| D44 | **Cross-session analytics: infrastructure in MVP2, not v1** (user, 2026-11-10; plan [09](09-analytics.md)).<br>• **Facts:** the server derives them per batch at ingest (architect option c), idempotently, into `analytics.db`. Raw facts are kept 30 days and daily summaries 13 months, with catch-up and a backfill job.<br>• **Tabs:** read from the page with config selectors into a built-in `$dom` store (labels; open, visible, and visible time from MVP2 start).<br>• **Privacy:** clicks are named by stable ids, never cell text. Only recorded users are covered, checked on the server.<br>• **Queries:** an API and CLI run saved query specs; the query page comes later.<br>• **Access:** who may query is decided at MVP2 start, with the DPIA update. Until then, both analytics flags stay off.<br>• **v1:** adds only console capture (D43), and ingest walks each batch once so `extract()` can plug in later. | The tool grows from support replay into usage and error analytics without a second pipeline, without extra browser work, and without a recorder release per new question. | user, architect; reviewed (architect, devil, auditor) |
 
 ## Design
 
@@ -323,6 +323,11 @@ Two packages: `packages/recorder-engine` (the only rrweb importer, D25) and `pac
   - upload ≤ 150 KB/min gzip at S1 *(target to be re-set from P1's measured bytes; architect A1)*.
 - [ ] Recording starts on app load with no user step, and startup time is unchanged within noise.
 - [ ] A slow full snapshot triggers the fallback (devil M10) without a pause → snapshot → pause loop.
+- [ ] Console capture stays inside the budget above (D43, 02 P1 console scenarios):
+  - 2,000 `console.debug` calls a second, with `debug` on;
+  - a `console.warn` of a 10,000-row array.
+
+  The rate limit runs before formatting, and formatting stops at the size cap.
 - [ ] On S3, the recorder pauses with a band instead of slowing the app (D8), and a hotspot naming the busy grid shows up on the Hotspots page for that day, linked to the session (D32).
 
 **Exactness:**
@@ -354,7 +359,11 @@ Two packages: `packages/recorder-engine` (the only rrweb importer, D25) and `pac
 - [ ] The replay iframe makes no network request except `/assets/<sha256>` (strict CSP). A forged recording with relative URLs can't reach `/api/*` (no `X-SR-UI` header) or the ingest port (D30).
 - [ ] Someone else's batch for an existing recording is refused (write key, 403), and a flood under one userId from another IP can't use up that user's quota (devil X16).
 - [ ] Opening a session without a name and reason is blocked; the access log records the name, reason, IP and session.
-- [ ] A JWT or `Bearer` value printed with `console.warn` or `console.error` is scrubbed before it leaves the browser (D43, D18).
+- [ ] Console lines (D43) leak no secrets. All of these are masked before they leave the browser, checked with `grep-day`:
+  - a JWT or `Bearer` value;
+  - a JWT cut by the 2,000-character limit;
+  - a `password` or `apiKey` key at any depth of a logged object;
+  - a URL with a password (`wss://user:pw@host`).
 
 **Build plugin:**
 - [ ] Plain Redux actions are captured for React 17 + webpack 5, React 18 + Vite 7 and React 19 + Vite 7. That includes actions dispatched through thunk or saga middleware, and reducers added later with `replaceReducer`.
@@ -368,7 +377,7 @@ Two packages: `packages/recorder-engine` (the only rrweb importer, D25) and `pac
 **Replay:**
 - [ ] List by user and date; play/pause, back/next, all speeds, scrubber, deep link, state panel.
 - [ ] Empty, loading and error states.
-- [ ] Console lines show as rows in the action list, with a level icon, the message and a repeat count, and a level filter. `console.error` lines count toward the session's error badge. With the default config only `error` and `warn` are recorded. Adding `log` to `console.levels` records `console.log` lines from the next page load. The app's own console output and behaviour are unchanged (D43).
+- [ ] Console lines show as rows in the action list, with a level icon, the message and a repeat count, and a level filter. The session's ⚠ badge counts uncaught errors plus `console.error` lines, and an error seen by both counts once. A recording that hits the console cap shows a `console-capped` note. With the default config only `error` and `warn` are recorded. Adding `log` to `console.levels` records `console.log` lines from the next page load. The app's own console output and behaviour are unchanged (D43).
 - [ ] A seek in a busy 8-hour session takes under 2 s. On the busiest desk it may take longer, with a progress bar (user, 2026-11-10).
 - [ ] Asset cache on: after a redeploy changes an icon and a font, an older session still replays with the old icon and font, and the iframe requests only `/assets/<sha256>` on our origin.
 
@@ -623,6 +632,37 @@ unchanged. The leader applied:
 Rejected, as the auditor also advised: running server slices in parallel; merging the tasks that
 were split on purpose (T1+T2, S3a+b, S5a+b, U4a+b, R7a+b); trimming K5's runs; merging I1 and I2.
 
+### Console and analytics review (2026-11-10)
+
+Architect, devil and auditor reviewed commit 0012 (D43, D44, plan 09). The devil found 4 blockers.
+All are fixed in the plans:
+
+| Finding | Fix | Where |
+|---|---|---|
+| **B1:** objects logged to the console skip secret-key masking, and URL passwords get through. | A bounded console formatter masks secret-named keys with `isSecretKey`, which moves to `@sr/protocol/secrets`. The scrubber masks passwords in URLs. A token cut by the size cap is masked. | D43, 03, 04 |
+| **B2:** the console wrapper has no cost limit. | The rate limit runs before formatting, and the formatter stops at the size cap. Calls pass straight through while recording is paused, and the wrapper's time counts in the self-budget. P1 gains console-flood and large-object scenarios. | D43, 02, 04 |
+| **B3:** free text would be kept 13 months in analytics summaries. | Clicks are named by stable ids only, and summaries hold no example text. | 09 L6 |
+| **B4:** fact counts depend on arrival order and can double. | Pure per-batch extraction, an idempotency guard table, catch-up, and a backfill of sealed files only. | 09 L1, L2 |
+| The error badge double-counts, and `counts.errors` changes meaning. | `counts.errors` stays `sr:error` only, a new `counts.consoleErrors` holds console errors, and `same` marks an error seen twice. | 03-L15, 05, 06 |
+| The shared limit drops real errors, and `count` misleads. | `sr:error` gets its own bucket, and a new `dropped` field counts what the limit dropped. | 03, 04 |
+| Console rows have no total cap. | A per-recording cap (`maxPerRecording`, 2,000), with a `console-capped` note. | 03, 04 |
+| Analytics isn't gated. | Flags are off by default (404 while off), the viewer grant applies until a login exists, and AN0 waits for Q1. | 09 L13 |
+
+Also fixed in 09:
+- one short-lived runner per query;
+- summary days in the user's local time;
+- an allow-list check on the server;
+- fingerprint rules;
+- erasure without `VACUUM`;
+- backfill as a throttled job;
+- every file named per task;
+- one shared fixture generator;
+- AN6 folded into AN0 and AN4.
+
+**User decisions in this round:**
+- visible time per tab is recorded from MVP2 start;
+- console capture follows the record/replay rules, with no separate expiry for the chatty levels.
+
 ## Open questions
 
 Answered by the user on 2026-11-10 in a one-by-one round (Q24–Q42). The console and analytics round (D43, D44) is answered too; MVP2 analytics questions live in [09](09-analytics.md) → Open questions. What is still open:
@@ -810,3 +850,4 @@ Q14 (performance wins, with a source fix raised: D8, D32), Q15 (asset cache behi
 - 2026-11-10 — Post-MVP TODO added (user): a grid data log, AG Grid rows logged like Redux state. A small spike in the B5 dry run (08 §13, task I6) decides it; open question Q43. No change to v1 scope or Acceptance.
 - 2026-11-10 — Auditor pass applied (leader): X1 first and K1 right after it; rule 7 for dependencies and `bun.lock`; X1's fixture workspaces as a glob; new X2 (gate-2 e2e specs in `e2e/**`) fed by K5's kept day files; K2 takes the startup and seek modes and R0's checks 3 and 5, so R0 runs at approval; R1 + PL1 one run; K3 decides R9's deferral, R11 as outputs only, and S13 runs once; `summarize.ts`; I3 to B4; per-lane-group reviews in B2–B3 and an opus Gate 1 review; batch table matches the dependencies, with filler work and a lean handoff. Goal and Acceptance unchanged.
 - 2026-11-10 — Console and analytics brainstorm (user, architect): D43, console capture in v1 (all levels possible; `error` and `warn` on by default; rows in the action list; `console.error` counts as an error). D44, analytics infrastructure in MVP2 (new plan 09): the server derives facts at ingest, `analytics.db` with 30-day facts and 13-month summaries, backfill, the `$dom` tab reader from DOM labels (open and visible), recorded users only, a query API and CLI with saved queries, no page; access decided at MVP2 start. New Scope and Acceptance lines; 09 in the sub-plan table.
+- 2026-11-10 — Console and analytics review merged (leader; architect, devil, auditor). Devil blockers B1 (console secrets) and B2 (console cost) fixed in D43, 03, 04 and 02; B3 and B4 fixed in 09. New Performance and Privacy Acceptance cases for console; the error badge counts uncaught plus console errors, once each. User: visible tab time is recorded from MVP2 start; console capture follows the record/replay rules (no separate expiry). See Risks → "Console and analytics review".

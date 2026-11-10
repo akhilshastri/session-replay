@@ -297,15 +297,18 @@ const maskParams = (q: string, n: Redacted) => {
   }).join('');
 };
 
+const USERINFO = /\b([a-z][a-z0-9+.-]*):\/\/[^\s/@:]+:[^\s/@]+@/gi;   // scheme://user:password@ (D43, devil B1)
+
 export const scrub = (text: string, n: Redacted) => text
   .replace(JWT, () => (n.jwt++, '****'))
   .replace(BEARER, () => (n.bearer++, 'Bearer ****'))
   .replace(BASIC, (m, b64) => (isUserPass(b64) ? (n.basic++, 'Basic ****') : m))  // "Basic Settings" stays
+  .replace(USERINFO, (_m, scheme) => (n.userinfo++, `${scheme}://****@`))   // wss://svc:pw@host
   .replace(QUERY, (q) => maskParams(q, n));
 ```
 
 - The scrubber covers links, images, CSS `url()`, text and `#fragments` anywhere in the recording
-  (D18). At seal, `sr:redacted {jwt, bearer, basic, urlParams}` is appended as the batch's last
+  (D18). At seal, `sr:redacted {jwt, bearer, basic, urlParams, userinfo}` is appended as the batch's last
   event when any count is above zero.
 - Trade ids and generated names (D35) are never touched: none of the patterns can match them.
 
@@ -350,23 +353,48 @@ export const installActionFlush = (engine: RecorderEngine, drainBridge: () => vo
   `pushState`/`replaceState` plus `popstate`/`hashchange`, deduped by URL, with token parameters
   stripped. `sr:error` comes from `error` and `unhandledrejection`, deduped, at most 10/s, stacks
   cut to 4 KB; repeats fold into `count`.
-- **Console (D43).** For each level in `config.console.levels` (default `error` and `warn`), the
-  recorder wraps `console[level]` once at start.
-  - The wrapper calls the original first, with the same arguments, so DevTools output and app
-    behaviour don't change.
-  - Then, inside `try/catch`, it formats the arguments: strings as they are; an `Error` as its
-    message plus stack; other values with a capped, cycle-safe `JSON.stringify` (depth 3); DOM
-    nodes as `<tag#id.class>`.
-  - The line is cut to `maxChars` (2,000), passes the D18 scrubber, and becomes
-    `sr:console {level, message, stack?, count}`.
-  - A re-entry flag skips our own output and anything logged while we format.
-  - Identical lines within 1 s fold into `count`.
-  - `error` and `warn` share the 10/s limit with `sr:error`. `info`, `log` and `debug` have their
-    own 10/s limit, and dropped lines are added to the next line's `count`.
-  - On stop or kill, the wrappers stay but pass straight through (inert, like the other patches).
-    A change to `levels` applies at the next start.
-  - DevTools would show `sr-recorder.js` as the source of every console line, so R11 lists the
-    bundle in its source map's `x_google_ignoreList`, and Chrome then shows the app's own call site.
+- **Console (D43).** Console capture follows the record/replay rules (user): it runs only while
+  this user is recorded, with the same config, kill switch and retention.
+  - **Lazy:** only the levels in `config.console.levels` (default `error`, `warn`) are wrapped,
+    so an unrecorded `console.log` keeps its DevTools source line. A symbol marks our wrapper, so
+    a pause and resume never wraps twice. Level changes apply from the next page load.
+  - **Order per call** (devil B2):
+    1. call the original first, with the same arguments;
+    2. skip if we're re-entering, or if recording is paused (D8: pass straight through);
+    3. apply the rate limit, before any formatting;
+    4. format;
+    5. fold repeats.
+
+    `error` and `warn` share one bucket of `maxPerSec`; `info`, `log` and `debug` share
+    another; `sr:error` has its own. Lines the limit drops are counted in the next line's
+    `dropped`, not its `count`. Time spent in the wrapper counts in the self-budget (R8).
+  - **A bounded formatter** (`capture/console-format.ts`, about 60 lines; architect 5):
+    - depth 3, at most 20 keys or items per level, and it stops at `maxChars` (2,000);
+    - a WeakSet for cycles;
+    - getters shown as `[Getter]` and never called; `toJSON` used only for `Date`;
+    - `try/catch` per argument, because a revoked proxy throws on any access;
+    - DOM nodes shown as `<tag#id.class>`;
+    - values under secret-named keys masked with `isSecretKey` from `@sr/protocol/secrets` (devil B1);
+    - format strings `%s %d %i %f %o %O` applied; `%c` dropped together with its CSS argument.
+  - **Cuts:** after any cut, `maskCutToken` masks a trailing partial JWT, so a token cut at
+    `maxChars` can't slip past the scrubber (architect 4). The pipeline scrubber (R7a) then
+    scrubs the line like every other event; the wrapper doesn't scrub on its own.
+  - **Stacks:**
+    - `error`: the Error argument's stack, or `new Error().stack`;
+    - `warn`: `new Error().stack`;
+    - `info`, `log` and `debug`: none.
+
+    Our own frames are stripped, and a line whose first remaining frame is in our bundle is
+    dropped (rrweb's own warnings). Our own logging uses the saved original methods.
+  - **Repeats and doubles:** identical lines within 1 s fold into `count`. A WeakSet of Error
+    objects, shared with `sr:error`, marks the second sighting `same: true`. React logs an
+    uncaught render error with `console.error` and then rethrows it, so it counts once.
+  - **Cap:** after `maxPerRecording` lines (2,000), console capture stops for that recording,
+    with a `console-capped` note (03-L15).
+  - **Inert on stop:** on stop or kill, the wrappers stay but pass straight through.
+  - **DevTools:** wrapping would make DevTools show `sr-recorder.js` as every line's source. R11's
+    post-build step sets `ignoreList` and `x_google_ignoreList` to every source index in each
+    bundle's map, so Chrome shows the app's own call site wherever the map is served.
 
 ### Rate caps (D36, D23: the rrweb gate only)
 
@@ -498,7 +526,8 @@ stateDiagram-v2
   no registered store of that `app`; it closes when one registers (03).
 
 ```ts
-// Sample — not final code. packages/recorder/src/state/serialize.ts
+// Sample — not final code. packages/recorder/src/state/serialize.ts. SECRET_WORDS and isSecretKey move
+// to @sr/protocol/secrets (03 T1, no imports), shared with the console formatter and the server (D43).
 const SECRET_WORDS = new Set(['password', 'secret', 'token', 'otp', 'credential', 'credentials',
   'authorization', 'passphrase', 'pin', 'apikey', 'privatekey']);           // D18, widened
 const keyCache = new Map<string, boolean>();          // state keys repeat a lot, so this is ~free
@@ -786,7 +815,16 @@ on clicks and inputs, the 400/403/429/503 bodies, the asset routes, `sr:net`, `r
 - [ ] Typing shows each character in replay (L5). Password and one-time-code fields show `****`, and so does a password field after a "show password" toggle.
 - [ ] With ticks during a 150 ms press, seeking to each `sr:click` shows the frame before the app's reaction; with capped cells held, the frame shows their exact values.
 - [ ] `sr:net` has the right method, URL, status (0 for a network error) and `ms` for fetch and XHR, also after 300 requests, when the resource-timing buffer is full. Our own endpoint never appears.
-- [ ] Console (D43): with the default config, `console.error` and `console.warn` become `sr:console` events with level, message, stack and count. `info`, `log` and `debug` are recorded only when `console.levels` lists them. The app's console output and return values are unchanged. A value that throws in `toJSON`, a circular object and a 1 MB string are capped without throwing. A JWT in a console argument is scrubbed. The recorder's own logging is never captured. A flood of 1,000 lines a second stays within the limit, with the drops counted.
+- [ ] Console (D43):
+  - With the default config, `console.error` and `console.warn` become `sr:console` events with level, message, stack, `count` and `dropped`. `info`, `log` and `debug` are recorded only when `console.levels` lists them, and an unrecorded level keeps its DevTools source line.
+  - The app's console output and return values are unchanged.
+  - The formatter never calls a getter, stops at `maxChars`, and survives a revoked proxy, a value whose `toJSON` throws, a circular object, a 1M-item array and a 1 MB string.
+  - Masked: a `password` key at depth 3, a JWT cut at the size cap, and `wss://user:pw@host`.
+  - `%c` styling is dropped.
+  - The recorder's own logging and rrweb's warnings are never captured.
+  - An error that React logs and then rethrows counts once (`same`).
+  - 1,000 lines a second stay within the limit, with the drops in `dropped`.
+  - After `maxPerRecording` lines, a `console-capped` note.
 - [ ] App requests behave as without the recorder: the same outcome, unhandled rejections still fire, bodies and headers untouched.
 - [ ] A CSRF `<meta>` and a hidden CSRF input replay with empty values, in the first snapshot and when added later.
 - [ ] The no-rrweb-import test passes; an rrweb internal error never reaches the app.
@@ -832,19 +870,19 @@ on clicks and inputs, the 400/403/429/503 bodies, the asset routes, `sr:net`, `r
 
 ## Tasks
 
-- [ ] **R0 Recorder checks spike** — owns: `spike/recorder-checks/` — batch: B0, at approval — depends on: user approval, the rrweb pin (02-L5) — done when: findings are logged here for (1) seek by normalised position; (2) the D30 CSP: replay styling with `style-src 'unsafe-inline'`, and `frame-src 'none'` still allowing rrweb's about:blank iframe; (3) moved to 02 K2 (LoAF attribution); (4) `Bun.build` IIFE and worker outputs; (5) moved to 02 K2 (the worst seek, A5); (6) `DecompressionStream` over the framed chunk response (A4); (7) appending a window with `addEvent`, with no flash (A6); (8) rrweb's mirror handing back the serialized node of a live element (CSRF blanking).
+- [ ] **R0 Recorder checks spike** — owns: `spike/recorder-checks/` — batch: B0, at approval — depends on: user approval, the rrweb pin (02-L5) — done when: findings are logged here for (1) seek by normalised position; (2) the D30 CSP: replay styling with `style-src 'unsafe-inline'`, and `frame-src 'none'` still allowing rrweb's about:blank iframe; (3) moved to 02 K2 (LoAF attribution); (4) `Bun.build` IIFE and worker outputs, and whether its source maps can carry `ignoreList`/`x_google_ignoreList` (D43; if not, R11's post-build step adds them); (5) moved to 02 K2 (the worst seek, A5); (6) `DecompressionStream` over the framed chunk response (A4); (7) appending a window with `addEvent`, with no flash (A6); (8) rrweb's mirror handing back the serialized node of a live element (CSRF blanking).
 - [ ] **R1 Package scaffolds** — owns: `packages/recorder-engine/{package.json,tsconfig.json,test/setup.ts}`, `packages/recorder/{package.json,tsconfig.json,build.ts,test/setup.ts}` — batch: B1 — depends on: 03 T1 — done when: `bunx tsc --noEmit` and lint pass for both, and `bun test` runs the no-rrweb-import guard (happy-dom preload). Runs in one coder run with 07 PL1 (01 auditor pass).
 - [ ] **R2 Engine record core** — owns: `packages/recorder-engine/src/record/**`, `src/index.ts`, and a no-caps stub `src/rate-caps/index.ts` that R9 replaces — batch: B2 — depends on: R1 — done when: unit tests (`record` mocked) cover insert order, the 3 s hold-back and `take(true)`, Meta and CSRF routing, the fetch/XHR wrapper (fail open, same outcome, ignored endpoint), masking (including the toggle), token stripping, `gateActive` detection, the release hooks and checkpoint timing; type-check and lint pass.
 - [ ] **R3 ReplayEngine core** — owns: `packages/recorder-engine/src/replay/{engine,normalise,gaps,rewrite,placeholders,types}.ts` — batch: B2 — depends on: R1, R0, 03 T2 — done when: unit tests cover normalise and offsets, `append`, gaps and "screen unknown", the window-start rule, muted markers during seek, `firstFrame`, the URL rewrite with unknown URLs made inert (every attribute kind, mutations, style rules, `@import`, `#id` kept), and the error cases; type-check and lint pass.
 - [ ] **R4 Loader, sessions, config** — owns: `packages/recorder/src/{loader,session,config}/**` — batch: B3 — depends on: R2 — done when: unit tests cover gating (core never requested when not enabled), the queue left unadopted by the loader, kill only on an explicit answer, a failed fetch leaving it off but not killed, the user-id path and `identify()`, the session, duplicate and bfcache rules (marker set again), the write key, version re-fetch and the kill switch.
-- [ ] **R5 Capture** (breadcrumbs, flush at action, nav, errors, console, hidden tab, popout) — owns: `packages/recorder/src/capture/**` — batch: B3 — depends on: R4 — done when: unit tests cover listener order, event-time stamping and the click-after-release rule, masked labels and values, dedupe and rate limits, the 10-min hidden-tab rule, inert patches, and console capture (D43: levels from config, the original called first, formatting caps, scrubbing, the re-entry guard, repeat folding and the per-group limits).
-- [ ] **R6 State intake and serializer** — owns: `packages/recorder/src/state/**` — batch: B3 — depends on: R4 — done when: unit tests cover queue adoption, store snapshots after every FullSnapshot, `~2` names, `$root`, capture-time insertion, the per-key and snapshot caps, denied keys, `isSecretKey` (the masked and kept lists in Acceptance) and circular state.
-- [ ] **R7a Pipeline: encode and store** — owns: `packages/recorder/src/pipeline/{encode,store}/**` — batch: B3 — depends on: R4 — done when: unit tests (`fake-indexeddb`) cover per-event encoding in idle slices, the seal rules, scrubbing (JWT, `Bearer`, `Basic`, URL params, and the kept cases), `sr:redacted`, gzip, splitting and the single oversize event, and the IndexedDB queue with `versionchange`, `blocked`, quota, the 5 MB memory fallback and the 50 MB / 72 h caps.
+- [ ] **R5 Capture** (breadcrumbs, flush at action, nav, errors, console, hidden tab, popout) — owns: `packages/recorder/src/capture/**` — batch: B3 — depends on: R4 — done when: unit tests cover listener order, event-time stamping and the click-after-release rule, masked labels and values, dedupe and rate limits, the 10-min hidden-tab rule, inert patches, and console capture (D43: lazy wrapping of the enabled levels; the order per call, with the limit before formatting; the bounded formatter with `isSecretKey` and `%` handling; `maskCutToken`; stacks and own-frame dropping; `same`, `dropped` and the per-recording cap; pass-through while paused). Console lines are scrubbed by the pipeline (R7a).
+- [ ] **R6 State intake and serializer** — owns: `packages/recorder/src/state/**` — batch: B3 — depends on: R4 — done when: unit tests cover queue adoption, store snapshots after every FullSnapshot, `~2` names, `$root`, capture-time insertion, the per-key and snapshot caps, denied keys, `isSecretKey` (imported from `@sr/protocol/secrets`; the masked and kept lists in Acceptance) and circular state.
+- [ ] **R7a Pipeline: encode and store** — owns: `packages/recorder/src/pipeline/{encode,store}/**` — batch: B3 — depends on: R4 — done when: unit tests (`fake-indexeddb`) cover per-event encoding in idle slices, the seal rules, scrubbing (JWT, `Bearer`, `Basic`, URL params, URL userinfo, a console line carrying a JWT, and the kept cases), `sr:redacted`, gzip, splitting and the single oversize event, and the IndexedDB queue with `versionchange`, `blocked`, quota, the 5 MB memory fallback and the 50 MB / 72 h caps.
 - [ ] **R7b Pipeline: send** — owns: `packages/recorder/src/pipeline/{send/**,index.ts}` — batch: B3 — depends on: R7a — done when: unit tests (mocked `fetch`) cover the status table (both 403 reasons), the headers, backoff and `Retry-After`, the drop → checkpoint and too-big-snapshot rules, the keepalive budget, the tail in IndexedDB plus `sr:close`, and leftovers with their write keys.
-- [ ] **R8 Budget, pauses, hotspots, checkpoints** — owns: `packages/recorder/src/budget/**` — batch: B3 — depends on: R5, R7b, K3 — done when: fake-timer tests cover the pause rules, probe backoff, hysteresis, the snapshot fallback, the mutation-count checkpoint, the checkpoint after a drop (at most once a minute) and hotspot emission.
+- [ ] **R8 Budget, pauses, hotspots, checkpoints** — owns: `packages/recorder/src/budget/**` — batch: B3 — depends on: R5, R7b, K3 — done when: fake-timer tests cover the pause rules, probe backoff, hysteresis, the snapshot fallback, the mutation-count checkpoint, the checkpoint after a drop (at most once a minute), hotspot emission, and the console wrapper's time counted in the budget (D43).
 - [ ] **R9 Rate caps** — owns: `packages/recorder-engine/src/rate-caps/**` — batch: B4 — depends on: R2, K1, K3; **if K3 shows `full` fits at S2 without caps, the leader asks the user whether to defer R9, its Rate-caps Acceptance items and its spec to v2** (01 Q19) — done when: unit tests (fake gate and records) cover holding (pass-through when due, the first record per target and attribute, childList in order), arrival-order release, `maxRate` timing, release at actions and before checkpoint, `stop`, `setRateCaps` and restart, release before a removal, and caps off without the patch; the browser contract spec "a capped grid with row removals replays with zero rrweb warnings of any kind" is written and passes at the gate.
 - [ ] **R10 Assets** — owns: `packages/recorder/src/assets/**`, `packages/recorder-engine/src/replay/assets.ts` — batch: B4 — depends on: R3, R7a, 05-C4 — done when: unit tests cover allow-list matching, type and size limits, the missing-hash flow, re-announcing after every FullSnapshot, and mapping `sr:asset` events to `/assets/<sha256>` through R3's rewrite hook.
-- [ ] **R11 Worker mode and outputs** — owns: `packages/recorder/src/worker/**`, `packages/recorder/build.ts` (created in R1) — batch: B4 — depends on: R7b, K3; **if K3 keeps the main-thread pipeline (D11), R11 builds only the outputs, in the same coder run as R10, and the worker part waits** — done when: unit tests cover the handshake and the 3 s fallback (worker only); `bun run build` emits three IIFE bundles, ESM and `.d.ts`; `exports` and `files` are set; each bundle's source map lists it in `x_google_ignoreList` (D43; a post-build step adds the field if `Bun.build` doesn't).
+- [ ] **R11 Worker mode and outputs** — owns: `packages/recorder/src/worker/**`, `packages/recorder/build.ts` (created in R1) — batch: B4 — depends on: R7b, K3; **if K3 keeps the main-thread pipeline (D11), R11 builds only the outputs, in the same coder run as R10, and the worker part waits** — done when: unit tests cover the handshake and the 3 s fallback (worker only); `bun run build` emits three IIFE bundles, ESM and `.d.ts`; `exports` and `files` are set; a post-build step sets `ignoreList` and `x_google_ignoreList` to every source index in each bundle's map (D43), unless R0 found that `Bun.build` writes them.
 - Browser contract tests (golden replay, exactness at clicks, the R9 zero-warnings spec, no iframe requests) are written by qa in `specs` mode during B4 and run at the gate. Real-workspace integration is B5 (08).
 
 ## Risks
@@ -857,7 +895,9 @@ on clicks and inputs, the 400/403/429/503 bodies, the asset routes, `sr:net`, `r
 | A full snapshot of 25 mounted grid tabs is too big to send. | Recording stops with a band instead of looping (L19). P1 measures snapshot sizes; the body limit is sized from them, and P1 decides on suspending hidden grids (D32). |
 | Our fetch/XHR wrapper changes how app requests behave. | The original call goes out first, the app gets the same outcome, nothing reads bodies or headers, and the wrapper fails open. Acceptance compares with the unwrapped page. |
 | The URL scrubber masks a business value, or misses a secret. | The narrower D18 rule; `Basic` only when it decodes to `user:password`; Acceptance lists the kept cases (`?state=filled`, `?key=AAPL`, trade ids). |
-| The console wrapper changes app logging, or DevTools shows our bundle as the source of every line (D43). | The original is called first with the same arguments; formatting runs in `try/catch`; `x_google_ignoreList` in the source map (R11); R5 tests. |
+| The console wrapper slows the app: a `debug` flood in an AMPS handler, or a huge object (D43, devil B2). | The limit runs before formatting; the formatter is bounded and stops at `maxChars`; pass-through while paused; its time counts in the self-budget; P1's console load scenario measures it. |
+| A console line leaks a secret (devil B1). | `isSecretKey` on object keys, `maskCutToken` after cuts, URL userinfo in the scrubber, then the pipeline scrubber; Acceptance cases. |
+| The wrapper changes app logging, or DevTools shows our bundle as every line's source. | The original is called first with the same arguments; formatting runs in `try/catch`; `ignoreList` in the source maps (R11). |
 | AMPS WebSocket traffic isn't in the recording (D41). | The screen and Redux capture show its effect; the fetch/XHR wrapper never touches `WebSocket`. |
 | Fractional timestamps could upset a future rrweb. | Golden tests on every bump; recordings stay raw, only replay normalises. |
 | The keepalive tail is lost on a crash. | At most about 8 s of events (5 s seal + 3 s hold-back), and about 1 s after a user action; IndexedDB holds the rest. |
@@ -879,3 +919,4 @@ All answered by the user on 2026-11-10 (01, Q25–Q28):
 - 2026-11-10 — Open questions answered (user): no pre-login buffering needed; logout queue as proposed; no mini-app tagging; no other tools, WebSockets not recorded (D41); `sr:meta` carries `tz` and `tzOffsetMin` (D42).
 - 2026-11-10 — Auditor pass (01): R0 runs at approval without waiting for K1/K2, and its checks 3 and 5 move to 02 K2; R3 waits for R0; R1 runs with 07 PL1; K3 decides R9's deferral (user's call) and whether R11 builds only the outputs in R10's run; the worker Acceptance item is conditional, matching D11.
 - 2026-11-10 — Console capture (01 D43): the console wrapper rules in Capture, an Acceptance item, R5 covers it, R11 adds `x_google_ignoreList` to the source maps, and a Risks row. MVP2 adds the DOM probe in `src/dom-probe/` (09 AN5).
+- 2026-11-10 — Console and analytics review merged (leader). Console rules rewritten: lazy wrapping, the limit before formatting, a bounded formatter with `isSecretKey` and `%` handling, `maskCutToken`, stacks, `same` and `dropped`, a per-recording cap, pass-through while paused, wrapper time in the budget (devil B1, B2; architect 4, 5). The scrubber masks URL userinfo. `isSecretKey` moves to `@sr/protocol/secrets`. R0 checks source-map `ignoreList` support. R5, R6, R7a, R8 and R11 updated; new Risks rows.

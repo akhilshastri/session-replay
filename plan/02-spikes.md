@@ -113,7 +113,10 @@ bun patch --commit node_modules/@rrweb/record   # writes patches/@rrweb%2Frecord
 - 2 fetches/s; realistic typing (about 8 keys/s in bursts) plus a click every 3 s; route changes
   and periodic checkpoints;
 - **hide/show cycles** (devil X9): the browser tab hidden for 30 s, 5 min and 11 min (past the
-  10-min limit) by bringing a second tab to the front, and flexlayout tab switches every 20 s.
+  10-min limit) by bringing a second tab to the front, and flexlayout tab switches every 20 s;
+- **console load** (01 D43, devil B2): an AMPS-style handler calling `console.debug` 2,000 times a
+  second with `debug` on, and a `console.warn` of a 10,000-row array once a second, for recorder
+  `full`.
 
 **Run matrix** (keeps K3 to about a day of machine time, plus the soak):
 - every variant at S2 (real tick rate, no flash, as in the real app), unthrottled and at 4× CPU
@@ -207,7 +210,9 @@ const bytes = await fetch(`${spikeServer}/stats?run=${runId}`).then((r) => r.jso
 - **whether hidden mounted tabs still mutate the DOM**, and how much they add to snapshot size and time;
 - hide/show: the resume snapshot's time and whether it ran in idle time; the 11-min case stops
   with a `hidden-tab` band;
-- the audit slice: serializer time per action, and whether the per-key and total caps held.
+- the audit slice: serializer time per action, and whether the per-key and total caps held;
+- console load: wrapper time per call, main-thread overhead and bytes per minute. The budget must
+  hold (01 Acceptance → Performance).
 
 **Decision rules** (written back into plan 01 and 05 when P1 ends):
 - **Bytes (A1, 05-L11):**
@@ -296,7 +301,7 @@ scenarios as K3, with the defaults K3 chose (caps, worker, checkpoints). The har
   D11, the D36 defaults, Q19 and the first source fixes are written back to 01 and 08; the quota,
   rate limit, PVC size, body limit and S1 upload target to 01 and 05.
 - [ ] P1: the hidden-tab question is answered with evidence; the source-fix variants are ranked by
-  cost saved; the hide/show cycles and the audit slice are measured.
+  cost saved; the hide/show cycles, the audit slice and the console load are measured.
 - [ ] P1b: all "done when" points pass for webpack 5 and Vite 7.
 - [ ] K5: the budget, startup time and seek time hold with the built bundles, or each difference
   from K3 is explained and logged (01 Acceptance, devil X24).
@@ -309,7 +314,7 @@ scenarios as K3, with the defaults K3 chose (caps, worker, checkpoints). The har
   acceptance passes. Runs right after X1, never alongside: both edit the root `package.json` and
   `.gitignore` (01 rule 3).
 - [ ] **K2 P1 harness** (stress page, ticker, source-fix variants, CDP collector, byte counter,
-  `--bundles`, startup and seek modes, `summarize.ts`) — owns: `spike/perf-grid/` except `results/` and `results-built/` — batch: **B0**,
+  `--bundles`, startup and seek modes, console load, `summarize.ts`) — owns: `spike/perf-grid/` except `results/` and `results-built/` — batch: **B0**,
   parallel with K1 and K4 — depends on: Q24, the rrweb pin (L5) — done when: one variant produces a
   full metrics JSON, including raw and gzip bytes/min and full-snapshot size and time. The cap
   variants are wired, and skip with a note until K1 lands. The startup and seek modes (used again
@@ -360,3 +365,4 @@ scenarios as K3, with the defaults K3 chose (caps, worker, checkpoints). The har
   07-L1 (X28); a run matrix keeps K3 to about a day.
 - 2026-11-10 — Q24 answered (user): the P1 workload now feeds a viewport datasource with `setRowData` per conflated AMPS message; no cell flash, so the flash variants are gone; K2 checks what the datasource does while its tab is hidden.
 - 2026-11-10 — Auditor pass (01): K1 runs right after X1 and owns `spike/gate-check/`; K2 adds the startup and seek modes, R0's checks 3 and 5, and `summarize.ts`; K5 records into `apps/server` and keeps its day files for the Gate 2 specs (01 X2).
+- 2026-11-10 — Console load scenario added to P1 and K2 (01 D43, devil B2): `console.debug` at 2,000/s and a `console.warn` of a 10,000-row array; the budget must hold.

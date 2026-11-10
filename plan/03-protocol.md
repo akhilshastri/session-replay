@@ -6,9 +6,10 @@ Status: draft · Size: small · Parent: [01-session-replay.md](01-session-replay
 One package, `packages/protocol`, that defines every shape crossing a boundary: browser ↔ server,
 app ↔ recorder, server ↔ replay UI. With these contracts fixed first, the recorder, server, replay
 UI and state plugin can be built **in parallel by different agents** against the same types, mocks
-and golden fixtures. The package has two entries: `@sr/protocol` (zod schemas, types and helpers;
-its only runtime dependency is `zod`) and `@sr/protocol/publish` (the bridge helper, with no
-imports at all).
+and golden fixtures. The package has three entries: `@sr/protocol` (zod schemas, types and helpers;
+its only runtime dependency is `zod`), `@sr/protocol/publish` (the bridge helper, with no
+imports at all), and `@sr/protocol/secrets` (`isSecretKey` and `maskCutToken`, with no imports;
+used by the recorder's console formatter and state serializer and by the server, D43).
 
 ## Decisions
 
@@ -30,7 +31,7 @@ Inherits D2, D5, D11, D16, D20, D22, D29, D33, D36 from the parent plan. Local d
 | L12 | **Every `t` on the wire and in query DTOs is raw client time** (`Date.now()` ms in the recorded browser), the same clock rrweb uses. `SessionDetail` gives one `clockOffsetMs` per recording; the UI adds it only for display and seeks by raw `t`. | A per-chunk skew correction jitters with network latency and isn't monotonic; mixing corrected and raw times would put markers minutes off (devil X2). |
 | L13 | **A write key per recording.** The recorder makes a random key per recording, keeps it in memory, in sessionStorage and in each queued batch row (another tab may upload leftovers), and sends it as `X-SR-Write-Key`. The server stores its hash with seq 0 (if seq 0 never arrives, with the first stored batch); later batches of that recording must match. It is not an identity token. | Session ids are visible in the session list, so without it anyone on the network could append batches to a colleague's live recording (devil X16). |
 | L14 | **`/api/*` requires the header `X-SR-UI: 1`.** | The replay iframe can request same-origin images and styles, but it can't add headers, so a forged recording can't call the API with the viewer's cookie (devil X14). |
-| L15 | **Console lines are `sr:console` events** (D43). Only `error` and `warn` lines become server action rows; `info`, `log` and `debug` stay in the chunks and reach the action list as local rows (06-L14). `counts.errors` adds `console.error` lines. | Keeps the sparse action index small when a region turns on the chatty levels. |
+| L15 | **Console lines are `sr:console` events** (D43).<br>• **Action rows:** only `error` and `warn` lines become server action rows (`name` = the level, `summary` = the message cut to 200 characters, plus `count`). `info`, `log` and `debug` stay in the chunks and reach the action list as local rows (06-L14).<br>• **Counts:** `counts.errors` stays the count of `sr:error` events. The new `counts.consoleErrors` counts `console.error` lines not marked `same`.<br>• **`same: true`** marks an event whose Error object the other path already reported.<br>• **`dropped`** counts lines the rate limit dropped since the last line.<br>• **Cap:** a recording stops capturing console lines at `maxPerRecording` and emits a `console-capped` note. | Keeps the sparse action index small. Keeps `counts.errors` meaning what it meant, so the change stays additive (L3). Stops one React error from counting twice (devil R2–R4). |
 
 ## Design
 
@@ -97,6 +98,7 @@ export const FidelityReason = z.enum([
   'chunk-unreadable',  // server-made: a chunk failed its hash check or its key was shredded
   'no-clean-close',    // server-made: the recording ended without an sr:close
   'caps-off',          // rate caps are configured but the gate patch is missing, so caps are off (04)
+  'console-capped',    // the recording hit console.maxPerRecording; later lines aren't recorded (D43)
 ]);
 
 const Rec = <T extends z.ZodTypeAny>(v: T) => z.record(z.string(), v);
@@ -112,9 +114,11 @@ export const SrPayload = {
                             app: z.string().optional() }),
   'sr:nav':      z.object({ url: z.string() }),                              // token params stripped
   'sr:error':    z.object({ message: z.string(), stack: z.string().optional(),
-                            count: z.number().int().optional() }),            // repeats folded (D43)
-  'sr:console':  z.object({ level: ConsoleLevel, message: z.string(),       // args formatted, ≤ maxChars, scrubbed (D18)
-                            stack: z.string().optional(), count: z.number().int().optional() }), // D43, L15
+                            count: z.number().int().optional(),               // repeats folded (D43)
+                            dropped: z.number().int().optional(), same: z.boolean().optional() }), // L15
+  'sr:console':  z.object({ level: ConsoleLevel, message: z.string(),       // bounded formatter, ≤ maxChars (04)
+                            stack: z.string().optional(), count: z.number().int().optional(),
+                            dropped: z.number().int().optional(), same: z.boolean().optional() }), // D43, L15
   'sr:report':   z.object({ note: z.string().optional() }),
   'sr:state':    z.object({
     store: z.string(), kind: z.literal('redux'),
@@ -141,6 +145,7 @@ export const SrPayload = {
                             status: z.number().int(),                        // 0 = network error
                             ms: z.number() }),                               // from the engine's own fetch/XHR wrapper (04-L16)
   'sr:redacted': z.object({ jwt: z.number().int(), bearer: z.number().int(), basic: z.number().int(),
+                            userinfo: z.number().int().optional(),            // scheme://user:password@ (D43)
                             urlParams: z.number().int() }),                  // scrubber counts per batch
   'sr:close':    z.object({ reason: z.enum(['pagehide', 'logout', 'user-switch', 'kill', 'stopped']) }), // clean end (devil X19)
 } as const;
@@ -155,7 +160,7 @@ server-made reasons to `SessionDetail` itself; they never appear in the stream.
 | Gap band (the screen is incomplete) | `pause-budget`, `hidden-tab`, `popout`, `quota`, `buffer-overflow` | hatched band, banner while the play head is inside |
 | Gap band that runs **to the next full snapshot** (the screen is unknown until then) | `missing-batches`, `chunk-unreadable` | hatched band; the engine shows "screen unknown" instead of applying incremental events (04) |
 | Band, screen still complete | `snapshot-slow`; `no-state` on the state lane | thin band |
-| Note | `pipeline-fallback`, `state-capped`, `no-clean-close`, `caps-off` | a tick on the scrubber |
+| Note | `pipeline-fallback`, `state-capped`, `no-clean-close`, `caps-off`, `console-capped` | a tick on the scrubber |
 
 **When `no-state` starts and ends.** 10 s after recording starts, the recorder opens a `no-state`
 band for each remote named in `sr:meta.remotes` that has no registered store with that `app`. The
@@ -255,8 +260,12 @@ export const RecorderConfig = z.object({
   rateCaps: RateCaps.default({}),
   assetCache: z.object({ enabled: z.boolean(), allow: z.array(z.string()) }), // D33
   pipeline: z.enum(['main', 'worker']).default('main'),                      // D11
-  console: z.object({ levels: z.array(ConsoleLevel), maxPerSec: z.number().int(), maxChars: z.number().int() })
-    .default({ levels: ['error', 'warn'], maxPerSec: 10, maxChars: 2000 }), // D43
+  console: z.object({                                                      // D43; each field has its own default
+    levels: z.array(ConsoleLevel).default(['error', 'warn']),
+    maxPerSec: z.number().int().min(1).max(50).default(10),                // per bucket: error+warn, and info+log+debug
+    maxChars: z.number().int().min(200).max(8000).default(2000),
+    maxPerRecording: z.number().int().min(100).default(2000),
+  }).prefault({}),                                                          // zod 4: .prefault parses {}, so the inner defaults apply
 });
 ```
 
@@ -268,7 +277,7 @@ Sample served config for the pilot desk:
   "budget": { "cpuPct": 3, "longFrameMs": 50, "resumeAfterMs": 10000 },
   "rateCaps": { "positions": { "bid": 2, "ask": 2, "mid": 2 } },
   "assetCache": { "enabled": false, "allow": ["/static/img/", "https://fonts.corp.example/"] },
-  "console": { "levels": ["error", "warn"], "maxPerSec": 10, "maxChars": 2000 },
+  "console": { "levels": ["error", "warn"], "maxPerSec": 10, "maxChars": 2000, "maxPerRecording": 2000 },
   "pipeline": "main" }
 ```
 
@@ -356,8 +365,8 @@ export const SessionSummary = z.object({
   startedAt: z.number(), endedAt: z.number(),             // raw client ms (L12)
   days: z.array(Day),                                     // the UTC days the session touches
   live: z.boolean(),                                      // a batch arrived in the last 2 min
-  // counts.errors = sr:error events + console.error lines (L15)
-  counts: z.object({ errors: z.number().int(), failedReqs: z.number().int(), reports: z.number().int(),
+  // counts.errors = sr:error events; counts.consoleErrors = console.error lines not marked `same` (L15)
+  counts: z.object({ errors: z.number().int(), consoleErrors: z.number().int().default(0), failedReqs: z.number().int(), reports: z.number().int(),
                      bands: z.number().int(), missingBatches: z.number().int() }),
   identity: z.literal('client-asserted'),                 // D20: nothing checked the user id
 });
@@ -458,7 +467,7 @@ export const comparePos = (a: StreamPos, b: StreamPos, order: ReadonlyMap<string
 ### Golden fixtures (`fixtures/`)
 
 - `batch-v1-basic.json`: a full snapshot, clicks with `app`, an input, a nav, two Redux actions
-  (one with `removed`), an `sr:net` with status 500, an `sr:redacted`, an `sr:close`.
+  (one with `removed`), an `sr:net` with status 500, an `sr:redacted`, an `sr:close`, plus `sr:error` and `sr:console` lines at `error` (with a stack, `count` and one marked `same`), `warn` (with `dropped`) and `info` (D43).
 - `batch-v1-fidelity.json`: a pause band, a hidden-tab band, a `state-capped` note, a snapshot
   with `NotRecorded` keys, a rate-cap legend.
 - `session-v1-golden/`: a complete small recording. **Every future rrweb or protocol version must
@@ -485,7 +494,7 @@ Every package tests against these fixtures, so parallel work meets at the same s
 
 - [ ] T1 `packages/protocol`: schemas, types, position helpers, chunk framing and the `publish`
   entry — owns: `packages/protocol/{package.json,tsconfig.json,src/**,test/**}` — batch: **B1** —
-  done when the Acceptance items pass and `exports` has `.` and `./publish`.
+  done when the Acceptance items pass and `exports` has `.`, `./publish` and `./secrets` (`isSecretKey`, moved from 04's serializer, and `maskCutToken`; no imports; D43).
 - [ ] T2 Golden fixtures — owns: `packages/protocol/fixtures/**` — batch: **B1** — depends on: T1 —
   done when the fixtures validate and `session-v1-golden` replays in the spike Replayer.
 
@@ -520,3 +529,4 @@ Every package tests against these fixtures, so parallel work meets at the same s
   P1 (A1).
 - 2026-11-10 — Open-question answers (user): `sr:meta` gains `tz` and `tzOffsetMin` for the recorded user's local time (D42); the viewer grant covers every session in that browser for 8 h, so `AccessReq.sessionId` is optional (D38); `app` on clicks, inputs and action rows is reserved, not filled in the MVP (Q27).
 - 2026-11-10 — Console capture (01 D43): `ConsoleLevel`, the `sr:console` tag and event, `count` on `sr:error`, `RecorderConfig.console` (default `error` and `warn`, 10/s, 2,000 chars), `ActionKind` `console` with `level` and `count` on `ActionRow`, `counts.errors` includes `console.error`; L15: only `error` and `warn` become server action rows. All additive. MVP2 analytics contracts (`Fact`, `AnalyticsQuery`, `AnalyticsResult`, `domProbes`) are added additively at MVP2 start (09 AN0).
+- 2026-11-10 — Console and analytics review merged (leader). `sr:error` and `sr:console` gain `dropped` and `same`; `sr:redacted` gains `userinfo`; `console-capped` note; `RecorderConfig.console` gets per-field defaults, bounds and `maxPerRecording` with `.prefault({})`; `counts.errors` stays `sr:error` only and the new `counts.consoleErrors` holds console errors (L15 rewritten); new zod-free entry `@sr/protocol/secrets` with `isSecretKey` and `maskCutToken` (T1); T2 fixtures carry console and error lines. All additive.
