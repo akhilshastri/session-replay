@@ -537,6 +537,132 @@ On a branch `sr/dry-run` of the real workspace, against a dev namespace:
 6. Write `docs/integration/dry-run-report.md`: every guide step that was wrong or missing, the
    real versions for §10, and any open question answered. Fix the guide in the same change.
 7. Don't merge the branch. The pilot integration is a separate, reviewed change.
+8. If time allows, run the grid data log spike on the same branch (§13, task I6; post-MVP TODO).
+
+### 13. Later: grid data log (spike in the real workspace, task I6)
+
+**Status: TODO, post-MVP** (user, 2026-11-10). It isn't in v1 scope or in any Acceptance list. A
+small spike runs during the B5 dry run (§12); its numbers decide whether and how (01 Q43).
+
+**Why.** Market data isn't in Redux (01 Q39): AMPS feeds the grids straight through viewport
+datasources (01 Q24). So the state panel shows nothing about the prices and positions the user
+saw. The screen recording shows the visible cells, but only as formatted text, and nothing that
+was scrolled out of view. A grid data log would record each grid's rows **as data, next to Redux
+state**, so support can read exact values at the moment of a click, and search them.
+
+**The idea: a grid is a store whose top-level keys are row ids.** The MVP bridge already logs a
+store as "a snapshot, then the top-level keys that changed" (03, State bridge). Grid rows fit that
+shape: the snapshot is the rows in view, and each change is the rows that changed. So the replay's
+`stateAt`, diff view and store picker work unchanged.
+
+**Options to compare** (cheapest first):
+
+| | How | Recording cost | What support gets |
+|---|---|---|---|
+| A. Read the replay DOM | The replay UI reads `.ag-row[row-id] .ag-cell[col-id]` from the replayed page at the playhead and shows it as a table. | None: a replay-UI feature only | Visible, formatted values; nothing scrolled out of view |
+| B. Snapshots only | The grid registers on the bridge with a `getState()` that returns the rows in view. The recorder already reads it after every FullSnapshot. | Small: only at checkpoints | Exact values at each checkpoint, nothing in between |
+| C. Coalesced row log (**start here**) | B, plus one `grid/rows` entry per grid at most once a second, and at each click, holding only the rows that changed. | Bounded: rows in view × once a second | Exact values at every click; a diff per row |
+| D. Every update | One entry per `setRowData` call, i.e. per AMPS message. | Follows the AMPS rate: likely too high | Everything. Measure it as the upper bound; don't ship it |
+
+**Spike sample (option C).** It needs **no change to the baseline packages**: the grid registers
+as a `redux`-kind store named `<app>/ag-grid#<grid>`, so the MVP recorder and replay UI handle it
+as they are. A real `kind: 'ag-grid'` comes only if the log is adopted.
+
+```ts
+// Sample — not final code. Spike only (I6): logs one viewport grid's rows the way Redux state is
+// logged, through the MVP bridge as is. Lives on the sr/dry-run branch of the real workspace.
+import { publish } from '@sr/protocol/publish';     // no imports inside (03-L10)
+
+type Row = Record<string, unknown>;
+
+export const gridLog = (o: { app: string; grid: string; flushMs?: number; drop?: string[] }) => {
+  const store = `${o.app}/ag-grid#${o.grid}`;
+  const rows = new Map<string, Row>();               // the rows in view now, by row id
+  let changed: Record<string, Row> = {};
+  const removed = new Set<string>();                 // a Set: a row that scrolls out and back in is not both
+  const keep = (row: Row) =>                         // columns never logged (privacy, volume)
+    Object.fromEntries(Object.entries(row).filter(([k]) => !o.drop?.includes(k)));
+
+  publish({ v: 1, store, kind: 'redux', op: 'register', t: Date.now(),
+            meta: { app: o.app, lib: 'ag-grid' }, handle: { getState: () => Object.fromEntries(rows) } });
+
+  const flush = () => {
+    if (!removed.size && !Object.keys(changed).length) return;
+    publish({ v: 1, store, kind: 'redux', op: 'action', type: 'grid/rows', changes: changed, removed: [...removed], t: Date.now() });
+    changed = {};
+    removed.clear();
+  };
+  const timer = setInterval(flush, o.flushMs ?? 1000);                    // at most one entry a second
+  addEventListener('pointerdown', flush, { capture: true, passive: true }); // exact rows at each click
+
+  return {
+    /** Call right after params.setRowData(data), never before: the grid must not wait for the log. */
+    rows: (data: Record<number, Row>) => {
+      try {
+        for (const row of Object.values(data)) {
+          const id = String(row.id);
+          const kept = keep(row);
+          rows.set(id, kept);
+          changed[id] = kept;
+          removed.delete(id);
+        }
+      } catch { /* never break the app */ }
+    },
+    /** Call from setViewportRange with the ids now in view: rows that scrolled out leave the log. */
+    inView: (ids: string[]) => {
+      const now = new Set(ids);
+      for (const id of rows.keys()) {
+        if (now.has(id)) continue;
+        rows.delete(id);
+        delete changed[id];
+        removed.add(id);
+      }
+    },
+    stop: () => { flush(); clearInterval(timer); removeEventListener('pointerdown', flush, { capture: true }); },
+  };
+};
+```
+
+```ts
+// In the real app's viewport datasource (01 Q24). Sample — not final code.
+const log = gridLog({ app: 'blotter', grid: 'positions', drop: ['clientName'] });
+// AMPS message handler:          params.setRowData({ [i]: row }); log.rows({ [i]: row });
+// setViewportRange(first, last): log.inView(idsBetween(first, last));
+// destroy():                     log.stop();
+```
+
+**Spike checklist (TODO, with the dry run):**
+- [ ] List each viewport datasource in the real app: grid id, rows in view, columns, and whether
+  each row carries a stable id.
+- [ ] Check which AG Grid events fire on `params.setRowData()` in the viewport row model, at the
+  real AG Grid version (`cellValueChanged` doesn't fire for updates from code). If one fits, the
+  helper could hook the grid API instead of each datasource.
+- [ ] Add `gridLog` to one busy grid on the `sr/dry-run` branch. At S2, compare with recorder
+  `full` alone: bytes per minute, main-thread time per flush, long tasks (02 P1 method). It must
+  stay inside 01 Acceptance → Performance.
+- [ ] Measure option D once (`flushMs: 0`, one entry per update) as the upper bound.
+- [ ] Try option A on a replay: can a script read the grid from the replayed page at the
+  playhead? Which values are lost (formatting, columns out of view)?
+- [ ] Check that the recorder's secret-key rule (D18, `isSecretKey`) also catches column names
+  inside rows, or the helper must drop them itself.
+- [ ] Privacy: which columns must never be logged (`drop`), and does logging columns out of view
+  need a DPIA update?
+- [ ] Hidden tabs: no flushes while the grid's tab is hidden (the §4b source fix suspends it
+  anyway).
+- [ ] Ask support with 2–3 real tickets: would A, B or C have answered them faster than the
+  screen alone?
+- [ ] Write the numbers and a recommendation (drop, A, B or C) into `dry-run-report.md`, and
+  answer 01 Q43.
+
+**If it's adopted** (a v2 feature, planned then):
+- 03 adds `kind: 'ag-grid'` to `BridgeMsg` (additive) and a `grid` action kind;
+- 04 accepts the kind and flushes grid logs at user actions itself;
+- 06 lists grids in the state panel's store picker and hides `grid/rows` from the action list by
+  default;
+- the helper ships in `@sr/state-plugin`'s runtime or a small `@sr/grid-log` package (07).
+
+The recorder stays framework-free (AGENTS rule 3): the helper runs in the app, and the recorder
+only reads the bridge.
 
 ## Guidelines
 
@@ -576,6 +702,7 @@ On a branch `sr/dry-run` of the real workspace, against a dev namespace:
 - [ ] **I2 Guide pages** — owns: `docs/integration/**` (except the dry-run report) — batch: B4 — depends on: I1 — done when: §1–§12 exist as pages; every sample is labelled; a link check passes; reviewer passes.
 - [ ] **I3 Publish dry run** — owns: `docs/integration/publishing.md` — batch: B5 — depends on: the 04 and state-plugin package builds — done when: `bun publish --dry-run` for each package lists only `dist/` and `package.json`; the page records the real registry once the user names it. (Package `files` and `publishConfig` belong to those packages' plans.)
 - [ ] **I4 Real-workspace dry run** — owns: branch `sr/dry-run` in the real workspace; `docs/integration/dry-run-report.md` here — batch: B5 — depends on: I1–I3; a dev namespace with the server image — done when: §12 is complete and §8 passes. Run by the leader with the user, not a coder slice.
+- [ ] **I6 Grid data log spike (post-MVP TODO)** — owns: the `gridLog` helper on branch `sr/dry-run` in the real workspace; the "Grid data log" section of `docs/integration/dry-run-report.md` here — batch: B5, after I4 — depends on: I4 steps 1–5 working — done when: the §13 checklist is ticked, its numbers are in the report, and 01 Q43 has an answer. Run by the leader with the user, not a coder slice; no baseline package changes.
 - [ ] **I5 Pilot rollout** — owns: region config (stages 0–2) — batch: B5 — depends on: I4; DPIA and staff notice — done when: stage 2's exit criteria are met. User-led.
 
 ## Risks
@@ -603,9 +730,12 @@ Still open, before B5 (01 Q36, Q37, Q40):
 3. Which region runs the pilot, and which desk and 2–3 users go first?
 4. The real versions of React, Redux, AG Grid, flexlayout-react, webpack and Vite (read from the workspace in the dry run).
 
+After the B5 spike (01 Q43): log AG Grid data like Redux state, and which way (§13, I6)?
+
 ## Log
 
 - 2026-11-10 — drafted for the plan split (agent)
 - 2026-11-10 — Reviewed and merged into `plan/` by the leader. Aligned with 04 and 07: the loader and recorder bundles in one versioned folder (04-L17), `data-endpoint`, `window.SessionRecorder`, no pre-identify buffer, `srState.webpack()` / `srState.vite()` from `@sr/state-plugin`, the outcome check instead of a plugin-order rule, and `srAttach`.
 - 2026-11-10 — Architect and devil review merged (leader): the gateway proxies `/sr/` to the ingest port 3000 only; the replay UI is on its own hostname and port 3002, with a NetworkPolicy per port (L3, §2c, §7; X15). Kill switch in about 2 min through the ConfigMap and about 20 s through the `oc exec` override, with the command and the lift order; legal holds in the ConfigMap; erasure is the runbook in 05 (§5, §6; A14, X23). The §8 secrets check follows D18's wider list and narrower URL rule, searched in the pod with `grep-day` (X7, X26, X25). New §4b source fixes before rate caps: renderer `refresh()` with `nodeValue`, flash off, hidden-tab grids suspended (D32, A2). Troubleshooting rows for 403 `write-key`, 400 `ui-header`, "screen unknown" bands and a missing gate patch. Body limit 4 MiB to start (X10).
 - 2026-11-10 — Open questions answered (user): Node.js proxy in front of the host; `window.userId`; no host CSP; built-in MF plugin; one central config team; no `data-sr-app` marking; Node 22 check in the B5 dry run.
+- 2026-11-10 — Post-MVP TODO added (user): a grid data log, AG Grid rows logged like Redux state. New §13 with options A–D (replay DOM, snapshots, coalesced row log, every update), a spike sample that reuses the MVP bridge unchanged, and a spike checklist; task I6 runs it in the B5 dry run after I4.

@@ -39,7 +39,8 @@ Per-column recording rate caps (D36) are in v1 as a mechanism, with no caps by d
 - canvas content and popout windows: lowest priority, possibly never (D34).
 - Vite 8 (Rolldown) support for the build plugin; the MVP targets Vite 7.
 - a mini-app filter in the replay UI's action list (user, Q27): actions from all apps show together;
-- state capture for Redux Toolkit `configureStore` stores (D39).
+- state capture for Redux Toolkit `configureStore` stores (D39);
+- a **grid data log**, AG Grid rows logged like Redux state (user, 2026-11-10): a TODO. A small spike in the B5 dry run decides whether and how (08 §13, I6, Q43).
 
 The app loads only after a successful login, so the user id is known before the recorder starts (user, Q25).
 
@@ -412,7 +413,7 @@ flowchart LR
   B0 -. P1 numbers .-> B3
   B3 --> B4["B4 cross-cutting<br/>R9–R11 · S11–S14 · U9, U10 · PL5, PL6 · I1, I2 · K5"]
   B4 --> G2{{Gate 2: commit gate}}
-  G2 --> B5["B5 real workspace<br/>I3 → I4 · S15 · I5 pilot"]
+  G2 --> B5["B5 real workspace<br/>I3 → I4 → I6 · S15 · I5 pilot"]
 ```
 
 | Group | Tasks, in dependency order | Also waits for | Review |
@@ -422,7 +423,7 @@ flowchart LR
 | **B2** | 05: S2 → S3a → S3b → S4 → S5a → S5b · 04: R2 → R3 · 06: U2 → U3 · 07: PL2 → PL3 → PL4 | Gate 1 | one batched reviewer run |
 | **B3** | 05: S6 → S7 → S8 → S9 → S10 · 04: R4 → R5 → R6 → R7a → R7b → R8 · 06: U4a → U4b → U5 → U6 → U7 → U8 | R8: K3 | batched reviewer; qa writes the B4 specs (`specs` mode) when a slot is free |
 | **B4** | 04: R9 → R10 → R11 · 05: S11 → S12 → S13 → S14 · 06: U9 → U10 · 07: PL5 → PL6 · 08: I1 → I2 · 02: K5 (re-run P1 on the built bundles) · qa: PL7 and the browser contract specs | R9, R11, S14: K3; R9: K1 | **Gate 2: commit gate** |
-| **B5** | 08: I3 → I4 · 05: S15 · 08: I5 (pilot, user-led) | the B5 open questions | pilot "done when" |
+| **B5** | 08: I3 → I4 → I6 (grid data log spike, post-MVP TODO) · 05: S15 · 08: I5 (pilot, user-led) | the B5 open questions | pilot "done when" |
 
 ### Rules for parallel agents
 
@@ -454,7 +455,7 @@ step-by-step guide for B5.
 ## Tasks (cross-cutting; component tasks live in the sub-plans)
 
 Component tasks, each with its `owns:` list and done-when check, live in the sub-plans: 02 K1–K5,
-03 T1–T2, 04 R0–R11 (R7 split into R7a/R7b), 05 S1–S15 (S3 and S5 split into a/b), 06 U1–U10 (U4 split into U4a/U4b), 07 PL0–PL7, 08 I1–I5. The batch table above orders
+03 T1–T2, 04 R0–R11 (R7 split into R7a/R7b), 05 S1–S15 (S3 and S5 split into a/b), 06 U1–U10 (U4 split into U4a/U4b), 07 PL0–PL7, 08 I1–I6. The batch table above orders
 them. The old master tasks map like this: P1, P1a, P1b → 02; P2 → 03 + 04; P3 → 05; P4 → 06;
 P4b (assets) → 04 R10 + 05 S11 + 06 U10; P5 → 07.
 
@@ -584,6 +585,7 @@ Answered by the user on 2026-11-10 in a one-by-one round (Q24–Q42). What is st
 | 36 | before B5 | Internal npm registry and package scope (keep `@sr`?); image registry and per-region promotion | Not decided yet (user) |
 | 37 | before B5 | Block storage class and VolumeSnapshotClass per cluster; object storage for closed day files and backups | Not known yet (user); the startup check refuses network filesystems anyway |
 | 40 | before B5 | Pilot region, desk and first 2–3 users | Decide later (user) |
+| 43 | after the B5 spike (08 I6) | Log AG Grid data like Redux state? If so, which way: read the replay DOM, snapshots only, or a coalesced row log? | TODO (user, 2026-11-10). Start with the coalesced row log (08 §13, option C); it reuses the MVP bridge, so the baseline needs no change |
 
 **Answers from the 2026-11-10 round** (user):
 
@@ -757,3 +759,4 @@ Q14 (performance wins, with a source fix raised: D8, D32), Q15 (asset cache behi
   singleton, built-in MF plugin, no market data in Redux, and RTK `configureStore` apps not
   captured in the MVP (D39, Q39); the Node 22 check moves to the B5 dry run (Q41); alert hours
   08:00–18:00 local (Q42). Still open, before B5: Q36, Q37, Q40; after P1: Q19.
+- 2026-11-10 — Post-MVP TODO added (user): a grid data log, AG Grid rows logged like Redux state. A small spike in the B5 dry run (08 §13, task I6) decides it; open question Q43. No change to v1 scope or Acceptance.
