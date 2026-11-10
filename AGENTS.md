@@ -66,7 +66,7 @@ stop and ask.
 5. **App performance first.** The recorder must stay inside the budget in plan 01 → Acceptance → Performance. When in doubt, it pauses and shows a band.
 6. **Replay never runs app code or fires live requests.** The rrweb Replayer stays sandboxed, and the replay UI sends a strict CSP. Never enable `UNSAFE_replayCanvas`.
 7. **The server acks only after commit.** SQLite needs local block storage, never NFS/CephFS.
-8. **One owner per file inside a batch.** Shared root files (`package.json`, `tsconfig.base.json`, `.gitignore`) change only through the scaffold task or the plan owner.
+8. **One owner per file among tasks that run at the same time.** Shared root files (`package.json`, `tsconfig.base.json`, `.gitignore`) change only through the root scaffold task (X1), a task whose `owns:` names them, or the plan owner.
 
 ## Code style
 

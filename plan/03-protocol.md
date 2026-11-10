@@ -6,8 +6,9 @@ Status: draft · Size: small · Parent: [01-session-replay.md](01-session-replay
 One package, `packages/protocol`, that defines every shape crossing a boundary: browser ↔ server,
 app ↔ recorder, server ↔ replay UI. With these contracts fixed first, the recorder, server, replay
 UI and state plugin can be built **in parallel by different agents** against the same types, mocks
-and golden fixtures. The package has two entries: `@sr/protocol` (zod schemas and types; its only
-runtime dependency is `zod`) and `@sr/protocol/publish` (the bridge helper, with no imports at all).
+and golden fixtures. The package has two entries: `@sr/protocol` (zod schemas, types and helpers;
+its only runtime dependency is `zod`) and `@sr/protocol/publish` (the bridge helper, with no
+imports at all).
 
 ## Decisions
 
@@ -18,14 +19,17 @@ Inherits D2, D5, D11, D16, D20, D22, D29, D33, D36 from the parent plan. Local d
 | L1 | Our events are **rrweb custom events** (`type: 5`) whose `data.tag` starts with `sr:`. The engine stamps and inserts them itself; it never uses `record.addCustomEvent`, which re-stamps (D2). | rrweb's Replayer keeps working on the mixed stream and ignores tags it doesn't know. |
 | L2 | Every event has a **stream position** `{ recordingId, seq, idx }`, where `idx` is its index in the batch. Seeking to an action uses its position, not its time (D16). | Positions are unique and ordered even when many events share a millisecond. |
 | L3 | Protocol version `v: 1` on every batch, bridge message and config. Changes are **additive only**: new tags or fields, never renamed or removed ones. The replay UI ignores unknown tags. | Old recordings must replay after upgrades (golden-recording tests). |
-| L4 | **`zod` schemas are the source of truth.** TypeScript types come from `z.infer`, and the server validates every request with the same schemas. zod 4 form throughout: `z.record(z.string(), X)`. | One definition and no drift; Hono's validator takes zod directly. zod 4.6's one-argument `z.record(X)` passes at runtime but fails the type check (05-C1). |
-| L5 | JSON on the wire. A batch body is `gzip` (`Content-Encoding: gzip`) or plain JSON. The `pagehide` tail sends plain JSON, because `CompressionStream` is async. | Simple and debuggable; gzip makes the size fine. |
+| L4 | **`zod` schemas are the source of truth.** TypeScript types come from `z.infer`, and the server validates every request with the same schemas. zod 4 form throughout: `z.record(z.string(), X)`. | One definition and no drift; Hono's validator takes zod directly. zod 4.6's one-argument `z.record(X)` passes at runtime but fails the type check. |
+| L5 | JSON inside; gzip on the wire. A batch body is `gzip` (`Content-Encoding: gzip`) or plain JSON. The `pagehide` tail sends plain JSON, because `CompressionStream` is async. | Simple and debuggable; gzip makes the size fine. |
 | L6 | The package scope is `@sr/*` in this baseline. The real workspace may rename it (see [08-integration.md](08-integration.md)). | |
 | L7 | **`sentAt` travels in the `X-SR-Sent-At` header**, not in the body. | The recorder encodes and gzips a batch once and resends the same bytes on every retry (04-L9). A body field that changes per attempt would force a re-encode. |
-| L8 | **Batch identity: `sha256 = SHA-256(JSON.stringify(events))`**, computed by the server on the parsed `events` (05-L4). | The tail is sent plain and retries are gzip, so hashing the body would make every retry look like a conflicting duplicate. |
-| L9 | **Positions in URLs and query strings are `recordingId:seq:idx`** (`posKey`). Positions in different recordings are ordered by the recording order in `SessionDetail.recordings`. | One readable form for deep links, cursors and query parameters (06-C2). |
+| L8 | **Batch identity = SHA-256 of the decoded body bytes** (the exact JSON text the recorder encoded once). The server **stores the gzip bytes as they arrived**; it gzips only the plain `pagehide` tail. Integrity on read is a hash of the stored bytes, so reads never inflate. | The server never parses, re-stringifies and re-gzips a batch it already has. A gzip retry and a plain tail of the same batch still decode to the same bytes (architect A4). |
+| L9 | **Positions in URLs and query strings are `recordingId:seq:idx`** (`posKey`). Positions in different recordings are ordered by the recording order in `SessionDetail.recordings`. **Every range is half-open:** `from`/`after` as stated per route, `to` always exclusive. | One readable form for deep links, cursors and query parameters, and one rule for every range (devil X25). |
 | L10 | **`@sr/protocol/publish` has no imports.** App bundles (through the state plugin's runtime) import only this entry; the recorder uses `import type` only. | zod must never ship into the apps or the recorder (07-L5). |
-| L11 | **Until a recorder adopts the queue, `publish` folds each `action` into its store's `register` message.** An unadopted queue therefore holds one message per store. | A remote running on its own dev server has no recorder, and its queue must not grow without limit (07-G). Recording starts with one snapshot per store anyway (04, State intake). |
+| L11 | **Before a recorder adopts the queue, `publish` keeps only `register` messages and drops actions.** Each `register` carries the store's handle, so at start (and after every full snapshot) the recorder reads `getState()` itself. | The queue stays bounded by the number of stores, with no folding logic, and every screen keyframe gets a matching state snapshot (architect A9; devil X12, X13). |
+| L12 | **Every `t` on the wire and in query DTOs is raw client time** (`Date.now()` ms in the recorded browser), the same clock rrweb uses. `SessionDetail` gives one `clockOffsetMs` per recording; the UI adds it only for display and seeks by raw `t`. | A per-chunk skew correction jitters with network latency and isn't monotonic; mixing corrected and raw times would put markers minutes off (devil X2). |
+| L13 | **A write key per recording.** The recorder makes a random key per recording, keeps it in memory, in sessionStorage and in each queued batch row (another tab may upload leftovers), and sends it as `X-SR-Write-Key`. The server stores its hash with seq 0 (if seq 0 never arrives, with the first stored batch); later batches of that recording must match. It is not an identity token. | Session ids are visible in the session list, so without it anyone on the network could append batches to a colleague's live recording (devil X16). |
+| L14 | **`/api/*` requires the header `X-SR-UI: 1`.** | The replay iframe can request same-origin images and styles, but it can't add headers, so a forged recording can't call the API with the viewer's cookie (devil X14). |
 
 ## Design
 
@@ -41,20 +45,20 @@ sequenceDiagram
   Srv-->>Rec: RecorderConfig {enabled, rateCaps, ...}
   App->>Rec: Redux actions via window.__SR_BRIDGE_Q__
   Rec->>Rec: rrweb events + sr:* events, stamped at capture
-  loop about once a second (04-L8)
-    Rec->>Srv: POST /sr/ingest (IngestBatch, gzip, X-SR-Sent-At)
+  loop every 5 s, or within 1 s of a user action (04-L8)
+    Rec->>Srv: POST /sr/ingest (IngestBatch, gzip, X-SR-Sent-At, X-SR-Write-Key)
     Srv-->>Rec: 204 after commit (X-SR-Config-Version)
   end
   opt asset cache on (D33)
     Rec->>Srv: POST /sr/assets/missing {hashes}
     Rec->>Srv: PUT /sr/assets/:sha256 (only the missing ones)
   end
-  UI->>Srv: GET /api/sessions?user=u123&day=20261110
+  UI->>Srv: GET /api/sessions?user=u123&day=20261110 (X-SR-UI: 1 on every /api call)
   UI->>Srv: POST /api/access {sessionId, name, reason}
   UI->>Srv: GET /api/sessions/:id (detail: recordings, snapshots, bands)
   UI->>Srv: GET /api/sessions/:id/actions?kinds=click,input&after=r1:0:3
-  UI->>Srv: GET /api/sessions/:id/chunks?from=r1:0:0&to=r1:40:0
-  UI->>UI: ReplayEngine.load(chunks) → rrweb Replayer (sandboxed iframe)
+  UI->>Srv: GET /api/sessions/:id/chunks?from=r1:0:0&to=r1:40:0 (stored gzip, framed)
+  UI->>UI: inflate → ReplayEngine.load(chunks) → rrweb Replayer (sandboxed iframe)
 ```
 
 ### Events (`src/events.ts`)
@@ -73,23 +77,30 @@ export const StreamPos = z.object({
 export const SrTag = z.enum([
   'sr:click', 'sr:input', 'sr:nav', 'sr:error', 'sr:report',
   'sr:state', 'sr:fidelity', 'sr:hotspot', 'sr:asset', 'sr:meta', 'sr:rate-caps',
-  'sr:net', 'sr:redacted',
+  'sr:net', 'sr:redacted', 'sr:close',
 ]);
 
 export const FidelityReason = z.enum([
   'pause-budget',      // D8: the self-budget paused recording
-  'hidden-tab',        // the tab was in the background, so recording paused
+  'hidden-tab',        // the tab stayed hidden past the limit, so recording stopped (04)
   'popout',            // D34: popout open, not recorded
   'snapshot-slow',     // checkpoint interval stretched (devil M10)
-  'missing-batches',   // a seq gap, or batches the client had to drop
+  'missing-batches',   // server-made: a seq gap; or a recorder-side drop
   'quota',             // daily quota hit
   'pipeline-fallback', // the worker failed; main-thread pipeline took over (D11)
   'buffer-overflow',   // the upload queue cap (50 MB / 72 h) dropped the oldest batches
-  'no-state',          // a remote with no state captured
-  'state-capped',      // a store snapshot or changed key was over the size cap and dropped (04-L14)
+  'no-state',          // a declared remote with no store captured
+  'state-capped',      // a store key was over the size cap and replaced by a placeholder (04-L14)
+  'chunk-unreadable',  // server-made: a chunk failed its hash check or its key was shredded
+  'no-clean-close',    // server-made: the recording ended without an sr:close
+  'caps-off',          // rate caps are configured but the gate patch is missing, so caps are off (04)
 ]);
 
 const Rec = <T extends z.ZodTypeAny>(v: T) => z.record(z.string(), v);
+
+/** Stands in for a state value that wasn't recorded (devil X3, X11). */
+export const NotRecorded = z.object({ $sr: z.literal('not-recorded'), why: z.enum(['denied', 'capped']),
+                                      bytes: z.number().int().optional() });
 
 export const SrPayload = {
   'sr:click':    z.object({ label: z.string(), selector: z.string(),
@@ -103,7 +114,7 @@ export const SrPayload = {
     store: z.string(), kind: z.literal('redux'),
     op: z.enum(['snapshot', 'action']),
     type: z.string().optional(),                                             // op = action: the action type
-    state: z.unknown().optional(),                                           // op = snapshot
+    state: z.unknown().optional(),                                           // op = snapshot; keys may hold NotRecorded
     changes: Rec(z.unknown()).optional(),                                    // op = action: changed top-level keys
     removed: z.array(z.string()).optional(),                                 // op = action: deleted top-level keys
   }),
@@ -120,19 +131,27 @@ export const SrPayload = {
   'sr:rate-caps': z.object({ configVersion: z.string(), caps: Rec(Rec(z.number())) }), // D36 legend
   'sr:net':      z.object({ method: z.string(), url: z.string(),            // token params stripped
                             status: z.number().int(),                        // 0 = network error
-                            ms: z.number() }),                               // 04-L16: replaces rrweb plugin events
-  'sr:redacted': z.object({ jwt: z.number().int(), bearer: z.number().int() }), // scrubber counts per batch
+                            ms: z.number() }),                               // from the engine's own fetch/XHR wrapper (04-L16)
+  'sr:redacted': z.object({ jwt: z.number().int(), bearer: z.number().int(), basic: z.number().int(),
+                            urlParams: z.number().int() }),                  // scrubber counts per batch
+  'sr:close':    z.object({ reason: z.enum(['pagehide', 'logout', 'user-switch', 'kill', 'stopped']) }), // clean end (devil X19)
 } as const;
 ```
 
 **Bands and notes.** A band is a `start: true` event plus a later `start: false` event with the
-same reason. A note is a single `start: true` event with no end.
+same reason. A note is a single `start: true` event with no end. The server adds the
+server-made reasons to `SessionDetail` itself; they never appear in the stream.
 
 | Kind | Reasons | Replay UI (06) |
 |---|---|---|
-| Gap band (the screen is incomplete) | `pause-budget`, `hidden-tab`, `popout`, `missing-batches`, `quota`, `buffer-overflow` | hatched band, banner while the play head is inside |
+| Gap band (the screen is incomplete) | `pause-budget`, `hidden-tab`, `popout`, `quota`, `buffer-overflow` | hatched band, banner while the play head is inside |
+| Gap band that runs **to the next full snapshot** (the screen is unknown until then) | `missing-batches`, `chunk-unreadable` | hatched band; the engine shows "screen unknown" instead of applying incremental events (04) |
 | Band, screen still complete | `snapshot-slow`; `no-state` on the state lane | thin band |
-| Note | `pipeline-fallback`, `state-capped` | a tick on the scrubber |
+| Note | `pipeline-fallback`, `state-capped`, `no-clean-close`, `caps-off` | a tick on the scrubber |
+
+**When `no-state` starts and ends.** 10 s after recording starts, the recorder opens a `no-state`
+band for each remote named in `sr:meta.remotes` that has no registered store with that `app`. The
+band closes when such a store registers.
 
 An `sr:*` event on the wire is an rrweb custom event:
 
@@ -160,7 +179,7 @@ export const IngestBatch = z.object({
   app: z.string(),
   events: z.array(z.unknown()).min(1),                  // rrweb events + sr:* events
 });
-// Not in the body: sentAt. It travels in the X-SR-Sent-At header (L7).
+// Not in the body: sentAt and the write key. They travel in headers (L7, L13).
 ```
 
 `POST /sr/ingest` request headers:
@@ -169,27 +188,29 @@ export const IngestBatch = z.object({
 |---|---|
 | `Content-Type` | `application/json` |
 | `Content-Encoding` | `gzip`, or absent for the plain `pagehide` tail (L5) |
-| `X-SR-Sent-At` | client `Date.now()` at this attempt, in ms. Required: the server corrects clock skew with `receivedAt − sentAt` (D31) |
+| `X-SR-Sent-At` | client `Date.now()` at this attempt, in ms. Required: the server derives `clockOffsetMs` from `receivedAt − sentAt` (D31, L12) |
+| `X-SR-Write-Key` | the recording's write key (L13). Required |
 
-The server computes `sha256` from the parsed events (L8). Responses:
+The server hashes the decoded body bytes for identity and stores the gzip bytes (L8). Responses:
 
 | Status | Body | Meaning | What the recorder does |
 |---|---|---|---|
-| 204 | — | Committed (D31: acked only after commit). Also a same-`seq` batch with a **different** sha256: stored as a flagged duplicate, never dropped (05) | Delete the batch from IndexedDB |
-| 208 | — | Duplicate `(recordingId, seq)` with the same sha256 (a retry) | Delete the batch |
-| 400 | `{reason:'invalid'\|'expired'}` | Fails the schema, missing `X-SR-Sent-At`, or older than retention | Drop it; `missing-batches` band |
-| 403 | `{reason:'user-mismatch'}` | The session is bound to another userId | Drop it; start a new session |
-| 413 | — | Body over 1 MiB, or gunzip output over 16 MiB | Drop it; `missing-batches` band (the recorder splits batches before this, 04) |
-| 429 | `{reason:'rate'\|'quota'}` + `Retry-After` | Per-user rate limit, or the daily quota | `rate`: wait `Retry-After`. `quota`: stop until UTC midnight with a `quota` band |
+| 204 | — | Committed (D31: acked only after commit). Also a same-`seq` batch with a **different** hash: stored as a flagged duplicate, never dropped (05) | Delete the batch from IndexedDB |
+| 208 | — | Duplicate `(recordingId, seq)` with the same hash (a retry) | Delete the batch |
+| 400 | `{reason:'invalid'\|'expired'}` | Fails the schema, a header is missing, or older than retention | Drop it; `missing-batches` band; next checkpoint now |
+| 403 | `{reason:'user-mismatch'\|'write-key'}` | The session is bound to another userId, or the write key doesn't match | Drop it; start a new session **and** a new recording |
+| 413 | — | Body over the limit (sized from P1's snapshot sizes; starts at 4 MiB), or gunzip output over 16 MiB | Drop it; `missing-batches` band (the recorder splits batches before this, 04) |
+| 429 | `{reason:'rate'\|'quota'}` + `Retry-After` | Rate limit, or the daily quota (both keyed on userId + IP) | `rate`: wait `Retry-After`. `quota`: stop until UTC midnight with a `quota` band |
 | 503 | `Retry-After` | Server backpressure (writer queue full, low disk) | Keep it; retry after `Retry-After` |
 | other 5xx / network | — | Not stored | Keep it; retry with backoff |
 
 Every 2xx response carries `X-SR-Config-Version`. If it differs from the cached config, the
 recorder re-fetches the config. That's how the kill switch and rate caps reach running tabs (D22).
 
-**Cadence and limits.** The recorder seals a batch about every 1 s or at 256 KB raw, with one
-upload in flight per tab (04-L8). The server's default limits per userId + IP are 20 req/s with a
-burst of 100 and 8 MiB/min, plus 500 MB/day stored per user (05-L11).
+**Cadence and limits.** The recorder seals a batch every 5 s or at 1 MiB raw, within 1 s after a
+user action, and when the tab hides or closes; one upload in flight per tab (04-L8). The server's
+limits and quota are derived from P1's measured bytes per minute (05-L11); the quota is a fuse at
+about 3× a busy user's day.
 
 ### Assets (`src/assets.ts`, D33, behind `assetCache.enabled`)
 
@@ -204,7 +225,7 @@ export const AssetMissingRes = z.object({ missing: z.array(Sha256) });
 |---|---|---|
 | `POST /sr/assets/missing` | `AssetMissingReq` | `AssetMissingRes`: the hashes the server doesn't have |
 | `PUT /sr/assets/:sha256` | the raw bytes; `Content-Type: image/*` or `font/*`; at most 2 MB | 204; 400 if the bytes don't hash to `:sha256`; 413 if too big |
-| `GET /assets/:sha256` | — | the cached asset, served with 05-L14's headers (replay UI only) |
+| `GET /assets/:sha256` | — | the cached asset, served with 05-L14's headers (replay UI port only) |
 
 ### Recorder config (`src/config.ts`)
 
@@ -221,6 +242,7 @@ export const RecorderConfig = z.object({
   enabled: z.boolean(),                       // allow-list result for this user (D22)
   killSwitch: z.boolean(),
   checkpointMinutes: z.number().default(12),
+  checkpointMutations: z.number().int().default(200_000), // also checkpoint after this many mutation records (A5)
   budget: z.object({ cpuPct: z.number(), longFrameMs: z.number(), resumeAfterMs: z.number() }),
   rateCaps: RateCaps.default({}),
   assetCache: z.object({ enabled: z.boolean(), allow: z.array(z.string()) }), // D33
@@ -232,7 +254,7 @@ Sample served config for the pilot desk:
 
 ```json
 { "v": 1, "version": "2026-11-10.3", "enabled": true, "killSwitch": false,
-  "checkpointMinutes": 12,
+  "checkpointMinutes": 12, "checkpointMutations": 200000,
   "budget": { "cpuPct": 3, "longFrameMs": 50, "resumeAfterMs": 10000 },
   "rateCaps": { "positions": { "bid": 2, "ask": 2, "mid": 2 } },
   "assetCache": { "enabled": false, "allow": ["/static/img/", "https://fonts.corp.example/"] },
@@ -245,19 +267,24 @@ Sample served config for the pilot desk:
 // Sample — the shape to build, not final code. src/bridge.ts
 export const BridgeMsg = z.object({
   v: z.literal(1),
-  store: z.string(),                    // '<app>/redux#<n>' (07-L9)
+  store: z.string(),                    // '<app>/redux#<n>' (07-L9); the recorder de-duplicates clashes
   kind: z.literal('redux'),             // MVP: plain Redux only (D39)
   op: z.enum(['register', 'action']),
   type: z.string().optional(),          // action: the action type
-  state: z.unknown().optional(),        // register: the full state (a live reference)
   changes: z.record(z.string(), z.unknown()).optional(),  // action: changed top-level keys ({ $root } if not an object)
   removed: z.array(z.string()).optional(),                // action: deleted top-level keys
-  meta: z.object({ app: z.string(), lib: z.string() }).optional(), // register: 'redux@4.2.1'
-  t: z.number(),                        // performance.timeOrigin + performance.now() at capture (D2)
+  meta: z.object({ app: z.string(), lib: z.string(),      // register: 'redux@4.2.1'
+                   deny: z.array(z.string()).optional() }).optional(), // register: denyKeys, regexes as '/src/flags'
+  t: z.number(),                        // Date.now() at capture: rrweb's clock (L12)
 });
 
-// The global queue that whichever side loads first creates (D5). The recorder adopts it by
-// replacing `push` and setting `adopted`; the loader sets `killed` for non-enabled users (D22).
+/** Not validated, never serialized: the register message's live handle (L11). */
+export type StoreHandle = { getState(): unknown };
+export type RegisterMsg = z.infer<typeof BridgeMsg> & { op: 'register'; handle: StoreHandle };
+
+// The global queue that whichever side loads first creates (D5). The recorder adopts it when it
+// starts recording, by replacing `push` and setting `adopted`. The loader sets `killed` only on an
+// explicit config answer (enabled: false or killSwitch); a kill lasts until reload (D22).
 declare global {
   interface Window { __SR_BRIDGE_Q__?: unknown[] & { killed?: boolean; adopted?: boolean } }
 }
@@ -268,48 +295,45 @@ Bridge messages hold **live references** to immutable Redux state. They never cr
 
 ```ts
 // Sample — the shape to build, not final code. src/publish.ts — no imports (L10).
-type Msg = { store: string; op: string; state?: unknown; changes?: Record<string, unknown>; removed?: string[] };
+type Msg = { op: string };
 
 /** How a store wrapper publishes. It fails open (D5): it never throws into the app. */
 export const publish = (msg: Msg) => {
   try {
     const q = (window.__SR_BRIDGE_Q__ ??= Object.assign([] as unknown[], { killed: false }));
     if (q.killed) return;
-    if (q.adopted || msg.op !== 'action') { q.push(msg); return; }
-    // No recorder yet: fold the action into its store's register message (L11).
-    const reg = q.find((m) => (m as Msg).store === msg.store) as Msg | undefined;
-    if (reg) reg.state = fold(reg.state, msg);
+    if (q.adopted || msg.op === 'register') q.push(msg); // before adoption, actions are dropped (L11)
   } catch { /* never break the app */ }
-};
-
-const fold = (state: unknown, m: Msg): unknown => {
-  if (m.changes && '$root' in m.changes) return m.changes.$root;
-  const next: Record<string, unknown> = { ...(state as Record<string, unknown>), ...m.changes };
-  for (const k of m.removed ?? []) delete next[k];
-  return next;
 };
 ```
 
 ### Query API for the replay UI (`src/query.ts`)
 
+Served on the replay UI port, never on the ingest port (05). Every `/api/*` request carries
+`X-SR-UI: 1` (L14); query parameters that are empty are left out, not sent as `''`.
+
 | Route | Returns |
 |---|---|
-| `GET /api/sessions?user=&day=yyyymmdd&hasErrors=1&limit=50&cursor=` | `SessionPage` (newest first) |
+| `GET /api/sessions?user=&day=yyyymmdd&hasErrors=1&limit=50&cursor=` | `SessionPage`, newest first. `day` matches every session that **touches** that UTC day |
 | `GET /api/sessions/:id` | `SessionDetail` |
 | `POST /api/access` (`AccessReq`) | 204 + the `sr_viewer` cookie and an 8 h grant for that session; logged (D38, 05-L10) |
 | `GET /api/sessions/:id/actions?kinds=click,input&after=&to=&failedOnly=1&limit=1000` | `ActionPage` |
-| `GET /api/sessions/:id/chunks?from=<posKey>&to=<posKey>&cursor=` | `ChunksResponse` |
+| `GET /api/sessions/:id/chunks?from=<posKey>&to=<posKey>&cursor=` | the framed chunk response below |
 | `GET /api/hotspots?day=yyyymmdd&app=` | `HotspotRow[]` for the Hotspots page (D32) |
-| `GET /assets/:sha256` | A cached asset (D33) |
 
-- **Errors:** detail, actions and chunks without a grant → 403 `{need:'access'}`. Unknown session
-  → 404 `{error:'not-found'}` (it may live in another region, D37). Bad parameters → 400
+- **Errors:** detail, actions and chunks without a grant → 403 `{need:'access'}`. A missing
+  `X-SR-UI` → 400 `{error:'ui-header'}`, logged as `denied`. Unknown session → 404
+  `{error:'not-found'}` (it may live in another region, D37). Bad parameters → 400
   `{error:'invalid', issues}`.
-- **Actions paging:** `after` is exclusive and `to` inclusive, both `posKey`s. `kinds` is a comma
+- **Actions** hold only the sparse kinds below; the UI builds state and request rows for the loaded
+  window from its events (architect A11). `after` is exclusive, `to` exclusive. `kinds` is a comma
   list of `ActionKind`. `failedOnly=1` keeps `net` rows only when `failed`; other kinds pass.
-- The replay UI calls these through Hono's typed client (`hc<QueryApi>`). `QueryApi` is exported
-  from `apps/server/src/api` (05); in B2 the UI uses its mock's type instead (06-L11). A renamed
-  route then fails the type check rather than surfacing at runtime.
+- **Chunks:** `from` inclusive, `to` exclusive, both inside **one recording**. A replay window never
+  crosses recordings (06). Without `to`, the read runs to the end of `from`'s recording. The route
+  returns **whole chunks** that cover the range, and sends `Content-Length` when it knows the total,
+  so the UI can show a download progress bar.
+- The replay UI calls the JSON routes through Hono's typed client (`hc<QueryApi>`). `QueryApi` is
+  exported from `apps/server/src/api` (05); in B2 the UI uses its mock's type instead (06-L11).
 
 ```ts
 // Sample — the shape to build, not final code.
@@ -318,7 +342,7 @@ export const PosKey = z.string().regex(/^[A-Za-z0-9_-]{1,64}:\d+:\d+$/);
 
 export const SessionSummary = z.object({
   sessionId: z.string(), userId: z.string(), app: z.string(),
-  startedAt: z.number(), endedAt: z.number(),             // epoch ms, skew-corrected (D31)
+  startedAt: z.number(), endedAt: z.number(),             // raw client ms (L12)
   days: z.array(Day),                                     // the UTC days the session touches
   live: z.boolean(),                                      // a batch arrived in the last 2 min
   counts: z.object({ errors: z.number().int(), failedReqs: z.number().int(), reports: z.number().int(),
@@ -329,19 +353,21 @@ export const SessionPage = z.object({ items: z.array(SessionSummary), next: z.st
 
 export const Band = z.object({
   reason: FidelityReason, recordingId: z.string(),
-  from: z.number(), to: z.number().nullable(),            // epoch ms; to = null: still open
+  from: z.number(), to: z.number().nullable(),            // raw client ms; to = null: still open
   detail: z.string().optional(),
 });
 
 export const SessionDetail = SessionSummary.extend({
   recordings: z.array(z.object({                          // ordered by startedAt (L9)
     recordingId: z.string(), startedAt: z.number(), endedAt: z.number(),
+    clockOffsetMs: z.number(),                            // add for display only (L12)
     lastSeq: z.number().int(), pipeline: z.enum(['main', 'worker']),
-    gaps: z.array(z.object({ fromSeq: z.number().int(), toSeq: z.number().int() })),
+    cleanClose: z.boolean(),                              // an sr:close arrived (devil X19)
+    gaps: z.array(z.object({ fromSeq: z.number().int(), toSeq: z.number().int() })), // missing distinct seqs, inclusive
+    dups: z.number().int(),                               // flagged duplicate rows
   })),
-  snapshots: z.array(z.object({                           // seek anchors: batches holding a full snapshot
-    recordingId: z.string(), seq: z.number().int(), t: z.number() })),
-  bands: z.array(Band),                                   // fidelity pairs + missing-batch gaps
+  snapshots: z.array(StreamPos.extend({ t: z.number() })), // seek anchors: the position of each FullSnapshot event
+  bands: z.array(Band),                                   // fidelity pairs + server-made gap bands
   notes: z.array(z.object({ reason: FidelityReason, t: z.number(), detail: z.string().optional() })),
   rateCaps: z.array(z.object({ t: z.number(), configVersion: z.string(), caps: RateCaps })),
   meta: SrPayload['sr:meta'].partial().optional(),        // the latest sr:meta
@@ -353,25 +379,14 @@ export const AccessReq = z.object({
   sessionId: z.string(), name: z.string().min(2).max(80), reason: z.string().min(3).max(200),
 });
 
-export const ActionKind = z.enum(['click', 'input', 'nav', 'error', 'state', 'net', 'fidelity', 'report', 'hotspot']);
+export const ActionKind = z.enum(['click', 'input', 'nav', 'error', 'net', 'fidelity', 'report', 'hotspot']);
 export const ActionRow = z.object({
   pos: StreamPos, t: z.number(), kind: ActionKind,
   name: z.string(), summary: z.string(),
-  failed: z.boolean().optional(),                         // net: status 0 or ≥ 400; error rows
+  failed: z.boolean().optional(),                         // net: status 0 or ≥ 400 (only failed net rows are stored); errors
   app: z.string().optional(),                             // the mini-app of a click or input
 });
 export const ActionPage = z.object({ items: z.array(ActionRow), next: PosKey.nullable() }); // next → `after`
-
-export const Chunk = z.object({
-  recordingId: z.string(), seq: z.number().int(), t0: z.number(), t1: z.number(),
-  sha256: Sha256, integrity: z.enum(['ok', 'mismatch', 'unreadable']),  // D28; unreadable: key shredded
-  events: z.array(z.unknown()),                           // empty when unreadable
-});
-export const ChunksResponse = z.object({
-  chunks: z.array(Chunk),                                 // whole chunks covering [from, to], recording order then seq
-  missing: z.array(z.object({ recordingId: z.string(), fromSeq: z.number().int(), toSeq: z.number().int() })),
-  next: z.string().nullable(),                            // set when the 8 MiB cap cut the response
-});
 
 export const HotspotRow = z.object({
   app: z.string(), remote: z.string().nullable(), area: z.string(),
@@ -379,6 +394,34 @@ export const HotspotRow = z.object({
   users: z.number().int(),
   example: z.object({ sessionId: z.string(), pos: StreamPos }),   // the longest single pause
 });
+```
+
+### Chunk response framing (`src/chunks.ts`)
+
+The server streams the stored gzip bytes unchanged (L8); the browser inflates them with
+`DecompressionStream`. One response, `Content-Type: application/vnd.sr.chunks`:
+
+```
+[4 bytes: header length N, big-endian] [N bytes: ChunksHeader as UTF-8 JSON] [blob 0][blob 1]…
+```
+
+```ts
+// Sample — the shape to build, not final code.
+export const ChunkMeta = z.object({
+  recordingId: z.string(), seq: z.number().int(), t0: z.number(), t1: z.number(),
+  bytes: z.number().int(),                                // length of this chunk's gzip blob in the body
+  integrity: z.enum(['ok', 'mismatch', 'unreadable']),    // D28; unreadable: key shredded → bytes = 0
+  dups: z.number().int(),                                 // flagged duplicates of this seq (only the first row is served)
+});
+export const ChunksHeader = z.object({
+  chunks: z.array(ChunkMeta),                             // in seq order, all from one recording
+  missing: z.array(z.object({ fromSeq: z.number().int(), toSeq: z.number().int() })),
+  next: z.string().nullable(),                            // set when the 8 MiB cap cut the response
+});
+
+/** Splits a framed response into header + per-chunk events. Lives here so 05's tests and 06 share it. */
+export declare const readChunks: (body: ReadableStream<Uint8Array>) =>
+  Promise<{ header: z.infer<typeof ChunksHeader>; batches: { meta: z.infer<typeof ChunkMeta>; events: unknown[] }[] }>;
 ```
 
 ### Position helpers (`src/pos.ts`)
@@ -400,12 +443,14 @@ export const comparePos = (a: StreamPos, b: StreamPos, order: ReadonlyMap<string
 ### Golden fixtures (`fixtures/`)
 
 - `batch-v1-basic.json`: a full snapshot, clicks with `app`, an input, a nav, two Redux actions
-  (one with `removed`), an `sr:net` with status 500, an `sr:redacted`.
-- `batch-v1-fidelity.json`: a pause band, a hidden-tab band, a `state-capped` note, a rate-cap legend.
+  (one with `removed`), an `sr:net` with status 500, an `sr:redacted`, an `sr:close`.
+- `batch-v1-fidelity.json`: a pause band, a hidden-tab band, a `state-capped` note, a snapshot
+  with `NotRecorded` keys, a rate-cap legend.
 - `session-v1-golden/`: a complete small recording. **Every future rrweb or protocol version must
   still replay it** (L3).
-- `query-v1/`: one sample response per query schema (`SessionPage`, `SessionDetail`, `ActionPage`,
-  `ChunksResponse`, `HotspotRow[]`). 06's mock serves them and 05's tests compare against them.
+- `query-v1/`: one sample per JSON query schema, plus `chunks-v1.bin` (a framed response built from
+  the batch fixtures by `fixtures/build-chunks.ts`). 06's mock serves them; 05's tests compare
+  against them.
 
 Every package tests against these fixtures, so parallel work meets at the same shapes.
 
@@ -415,16 +460,17 @@ Every package tests against these fixtures, so parallel work meets at the same s
 - [ ] Golden fixtures validate against the schemas.
 - [ ] The types compile in all consumer packages (`bunx tsc --noEmit` at the root).
 - [ ] No runtime dependency except `zod`; the built `@sr/protocol/publish` contains no imports.
-- [ ] `publish`: never throws (even with a broken queue object); does nothing when `killed`; an
-      unadopted queue still holds one message per store after 10,000 actions, with the folded
-      state equal to the store's real state.
+- [ ] `publish`: never throws (even with a broken queue object); does nothing when `killed`;
+      before adoption the queue holds only `register` messages after 10,000 actions.
 - [ ] `parsePos(posKey(p))` round-trips; `comparePos` orders across two recordings.
+- [ ] `readChunks` round-trips `chunks-v1.bin`, including an `unreadable` chunk with 0 bytes and a
+      response cut by `next`.
 
 ## Tasks
 
-- [ ] T1 `packages/protocol`: schemas, types, position helpers and the `publish` entry — owns:
-  `packages/protocol/{package.json,tsconfig.json,src/**,test/**}` — batch: **B1** — done when the
-  Acceptance items pass and `exports` has `.` and `./publish`.
+- [ ] T1 `packages/protocol`: schemas, types, position helpers, chunk framing and the `publish`
+  entry — owns: `packages/protocol/{package.json,tsconfig.json,src/**,test/**}` — batch: **B1** —
+  done when the Acceptance items pass and `exports` has `.` and `./publish`.
 - [ ] T2 Golden fixtures — owns: `packages/protocol/fixtures/**` — batch: **B1** — depends on: T1 —
   done when the fixtures validate and `session-v1-golden` replays in the spike Replayer.
 
@@ -434,7 +480,7 @@ Every package tests against these fixtures, so parallel work meets at the same s
 |---|---|
 | A late contract change ripples into every package. | Additive-only rule (L3); contract changes go through the leader and get a Log line here. |
 | `zod` adds weight to the recorder or app bundles. | The recorder imports types only (`import type`); apps import only `@sr/protocol/publish` (L10). Only the server validates at runtime. |
-| Folding in `publish` costs one object spread per action before the recorder adopts the queue. | It lasts only until adoption or the kill flag (startup, at most about a minute); `killed` makes it a no-op. |
+| The chunk framing is our own format. | It is tiny, shared by server and UI through `readChunks`, and round-trip tested; R0 checks `DecompressionStream` on concatenated blobs. |
 
 ## Log
 
@@ -448,3 +494,12 @@ Every package tests against these fixtures, so parallel work meets at the same s
   `recordings`, `snapshots`, `bands`, `notes`, `live`), `ActionPage` paging, `ChunksResponse`,
   `HotspotRow`, `AccessReq` and the `posKey` URL form (05-C6, 06-C1–C6); bands vs notes table;
   `query-v1/` fixtures.
+- 2026-11-10 — Architect and devil review merged (leader): identity = hash of the decoded body,
+  stored gzip served as a framed binary response (A4); the store handle in `register`, no folding,
+  actions dropped before adoption (A9, X12, X13); raw client time everywhere plus `clockOffsetMs`
+  (X2); write key per recording and quota on userId + IP (X16); `X-SR-UI` on `/api/*` (X14);
+  half-open ranges, windows inside one recording, FullSnapshot anchors with `idx`, sparse action
+  kinds, gap ranges, `dups` (X25, A11); `NotRecorded` placeholders and `meta.deny` (X3, X11);
+  `sr:close`, `chunk-unreadable`, `no-clean-close` and gap bands that run to the next full snapshot
+  (X1, X19); `no-state` rule; `checkpointMutations` (A5); 5 s cadence (A10); limits derived from
+  P1 (A1).
