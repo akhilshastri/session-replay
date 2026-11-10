@@ -268,7 +268,8 @@ spike/mf-plugin/
 
 The K2 harness, pointed with `--bundles` at R11's output, loads `sr-loader.js` with a script tag
 the way a host does; the loader then fetches the config and `sr-recorder.js`. Same seeds and
-scenarios as K3, with the defaults K3 chose (caps, worker, checkpoints).
+scenarios as K3, with the defaults K3 chose (caps, worker, checkpoints). The harness uploads to
+`apps/server`, not the spike server, and the day files are kept for Gate 2 (01 X2).
 - **Budget:** every item in 01 Acceptance → Performance, at S1 and S2, 5 min × 3, unthrottled and
   at 4×. The 8-hour soak repeats only if the 60-min memory differs from K3's.
 - **Startup:** time to first render and to the first idle callback with no loader, with the loader
@@ -302,23 +303,33 @@ scenarios as K3, with the defaults K3 chose (caps, worker, checkpoints).
 
 ## Tasks
 
-- [ ] **K1 P1a gate patch** — owns: `patches/`, root `package.json` (`patchedDependencies`),
-  `.gitignore` (allow `*.patch`) — batch: **B0**, parallel with K2 and K4 — depends on: user
-  approval, the rrweb pin (L5) — done when: the K1 acceptance passes. Runs before X1 or after it,
-  never alongside: both edit the root `package.json` and `.gitignore` (01 rule 3).
+- [ ] **K1 P1a gate patch** — owns: `patches/`, `spike/gate-check/` (the test page), root
+  `package.json` (`patchedDependencies`), `.gitignore` (allow `*.patch`) — batch: **B0**, parallel
+  with K2 and K4 — depends on: user approval, 01 X1, the rrweb pin (L5) — done when: the K1
+  acceptance passes. Runs right after X1, never alongside: both edit the root `package.json` and
+  `.gitignore` (01 rule 3).
 - [ ] **K2 P1 harness** (stress page, ticker, source-fix variants, CDP collector, byte counter,
-  `--bundles`) — owns: `spike/perf-grid/` except `results/` and `results-built/` — batch: **B0**,
+  `--bundles`, startup and seek modes, `summarize.ts`) — owns: `spike/perf-grid/` except `results/` and `results-built/` — batch: **B0**,
   parallel with K1 and K4 — depends on: Q24, the rrweb pin (L5) — done when: one variant produces a
   full metrics JSON, including raw and gzip bytes/min and full-snapshot size and time. The cap
-  variants are wired, and skip with a note until K1 lands.
+  variants are wired, and skip with a note until K1 lands. The startup and seek modes (used again
+  by K5) run against the spike recorder and answer 04 R0's checks 3 (LoAF attribution of
+  MutationObserver callbacks to an IIFE script URL) and 5 (the worst seek, to the end of a 12-min
+  S2 window, and whether a stepped forward seek can report progress). `bun
+  spike/perf-grid/summarize.ts` prints the results table and the derived quota, rate limit, PVC
+  size, body limit and S1 upload target by this plan's rules, for the leader to paste into 01, 02
+  and 05.
 - [ ] **K3 P1 measurement runs + soak** — owns: `spike/perf-grid/results/` — batch: **B0** —
   depends on: K2; K1 for the cap variants — done when: the P1 acceptance items pass. The leader
   runs the long runs in the background with Bash; no agent sits idle during the 8-hour soak.
 - [ ] **K4 P1b MF transform spike** — owns: `spike/mf-plugin/` — batch: **B0**, parallel with K1
   and K2 — depends on: user approval — done when: the P1b acceptance passes.
 - [ ] **K5 P1 on the built bundles** — owns: `spike/perf-grid/results-built/` — batch: **B4** —
-  depends on: R11, K3 — done when: the K5 acceptance passes and the numbers are in this plan. The
-  leader runs it in the background, as for K3.
+  depends on: R11, K3, 05 S7 (the harness uploads to `apps/server`) — done when: the K5 acceptance
+  passes and the numbers are in this plan. The
+  leader runs it in the background, as for K3. The day files are kept in `results-built/data/`:
+  the S2 recording is the busy session for 01's seek item, and the S3 run gives the hotspot for
+  the Hotspots item. 01 X2's gate specs read them.
 
 ## Risks
 
@@ -348,3 +359,4 @@ scenarios as K3, with the defaults K3 chose (caps, worker, checkpoints).
   and K4 run in parallel; new K5 re-runs P1 on the built bundles (X24); the P1b sample follows
   07-L1 (X28); a run matrix keeps K3 to about a day.
 - 2026-11-10 — Q24 answered (user): the P1 workload now feeds a viewport datasource with `setRowData` per conflated AMPS message; no cell flash, so the flash variants are gone; K2 checks what the datasource does while its tab is hidden.
+- 2026-11-10 — Auditor pass (01): K1 runs right after X1 and owns `spike/gate-check/`; K2 adds the startup and seek modes, R0's checks 3 and 5, and `summarize.ts`; K5 records into `apps/server` and keeps its day files for the Gate 2 specs (01 X2).

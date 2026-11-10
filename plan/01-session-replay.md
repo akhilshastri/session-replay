@@ -400,30 +400,37 @@ critical path. Two hard gates only:
 - **Gate 1, end of B1:** contracts and scaffolds reviewed; root `typecheck`, `lint` and `test` green.
 - **Gate 2, the commit gate after B4:** full e2e once, then the qa `gate` browser check.
 
-Only four tasks wait for P1's numbers (K3): R8 (budget), R9 (rate caps), R11 (worker mode) and
-S14 (sizing). Everything else runs while the 8-hour soak is still going.
+Only five tasks wait for P1's numbers (K3): R8 (budget), R9 (rate caps), R11 (worker mode),
+S13 (load test) and S14 (sizing). K3 also decides whether R9 is deferred and whether R11 builds the
+worker (Q19, D11). Everything else runs while the 8-hour soak is still going.
 
 ```mermaid
 flowchart LR
-  A[User approves the plan] --> B0["B0 spikes<br/>K1 · K2 · K4 in parallel → R0<br/>K3 runs + soak in the background"]
-  A --> B1["B1 contracts + scaffolds<br/>T1 → T2 · X1 → R1, PL1, S1, U1"]
+  A[User approves the plan] --> B0["B0 spikes<br/>K2 · K4 · R0 in parallel · K1 right after X1<br/>K3 runs + soak in the background"]
+  A --> B1["B1 contracts + scaffolds<br/>X1 first · T1 → T2 · R1+PL1, S1, U1"]
   B1 --> G1{{Gate 1}}
   G1 --> B2["B2 core<br/>server S2–S5 first · R2, R3 · U2, U3 · PL2–PL4"]
-  B2 --> B3["B3 features<br/>S6–S10 · R4–R8 · U4–U8"]
+  B2 --> B3["B3 features<br/>S6–S10 · R4–R8 · U4–U8 · X2 specs"]
   B0 -. P1 numbers .-> B3
-  B3 --> B4["B4 cross-cutting<br/>R9–R11 · S11–S14 · U9, U10 · PL5, PL6 · I1, I2 · K5"]
+  B3 --> B4["B4 cross-cutting<br/>R9–R11 · S11–S14 · U9, U10 · PL5, PL6 · I1–I3 · K5"]
   B4 --> G2{{Gate 2: commit gate}}
-  G2 --> B5["B5 real workspace<br/>I3 → I4 → I6 · S15 · I5 pilot"]
+  G2 --> B5["B5 real workspace<br/>I4 → I6 · S15 · I5 pilot"]
 ```
 
 | Group | Tasks, in dependency order | Also waits for | Review |
 |---|---|---|---|
-| **B0** | K1 (gate patch), K2 (P1 harness), K4 (P1b MF spike) in parallel → R0 (recorder checks); K3 (runs + 8 h soak; the leader runs it in the background) | approval | results written back into 01, 02 and 04; D11, D36 defaults, Q19, Q24 |
-| **B1** | 03: T1 → T2 · X1 (root scaffold) → 04 R1, 07 PL1, 05 S1, 06 U1 | approval (not K3). X1 starts after K1: both edit the root `package.json` and `.gitignore` | **Gate 1**; one batched reviewer run (Sonnet is fine for scaffolds) |
-| **B2** | 05: S2 → S3a → S3b → S4 → S5a → S5b · 04: R2 → R3 · 06: U2 → U3 · 07: PL2 → PL3 → PL4 | Gate 1 | one batched reviewer run |
-| **B3** | 05: S6 → S7 → S8 → S9 → S10 · 04: R4 → R5 → R6 → R7a → R7b → R8 · 06: U4a → U4b → U5 → U6 → U7 → U8 | R8: K3 | batched reviewer; qa writes the B4 specs (`specs` mode) when a slot is free |
-| **B4** | 04: R9 → R10 → R11 · 05: S11 → S12 → S13 → S14 · 06: U9 → U10 · 07: PL5 → PL6 · 08: I1 → I2 · 02: K5 (re-run P1 on the built bundles) · qa: PL7 and the browser contract specs | R9, R11, S14: K3; R9: K1 | **Gate 2: commit gate** |
-| **B5** | 08: I3 → I4 → I6 (grid data log spike, post-MVP TODO) · 05: S15 · 08: I5 (pilot, user-led) | the B5 open questions | pilot "done when" |
+| **B0** | K2 (P1 harness, with the startup and seek modes and R0's checks 3 and 5), K4 (P1b MF spike) and R0 (recorder checks) in parallel · K1 (gate patch) right after X1 · then K3 (runs + 8 h soak; the leader runs it in the background) | approval; K1 also X1 (both edit the root `package.json` and `.gitignore`) | results written back into 01, 02 and 04 from K2's `summarize.ts`; D11, the D36 defaults, Q19, and the R9, R11 and S13 calls |
+| **B1** | X1 (root scaffold) first, with 03 T1 alongside · after T1: 04 R1 + 07 PL1 (one coder run), 05 S1, 03 T2 · after X1: 06 U1 | approval (not K3) | **Gate 1**; one batched reviewer run on **opus**: it includes the T1 contracts, which are additive-only from then on |
+| **B2** | 05: S2 → S3a → S3b → S4 → S5a → S5b · 04: R2 ∥ R3 · 06: U2 → U3 · 07: PL2 ∥ (PL3 → PL4) | Gate 1; R3 also R0 | one reviewer run **per lane group** (S2–S5b, R2–R3, U2–U3, PL2–PL4), while that lane builds its next slice |
+| **B3** | 05: S6 → S7 → S8 → S9 → S10 · 04: R4 → (R5 ∥ R6 ∥ R7a) → R7b → R8 · 06: U4a (may start once U1 and T2 are done) → U4b → (U5 ∥ U6 ∥ U7 ∥ U8) · qa: X2 gate-2 specs (`specs` mode) when a slot is free | R8: K3 | one reviewer run per lane group, as in B2 |
+| **B4** | 04: R9 ∥ R10 ∥ R11 (R9 only if not deferred at K3; R10 + R11 in one coder run if K3 keeps the main-thread pipeline) · 05: S11 → S12 → S13 → S14 · 06: U9 → U10 · 07: PL5 → PL6 (one run if K4 was clean) · 08: I1 → I2, and I3 (a leader command) · 02: K5 (P1 on the built bundles, recorded into `apps/server`) · qa: PL7 and the browser contract specs | R9, R11, S13, S14: K3; R9: K1; K5: R11 and 05 S7 | **Gate 2: commit gate**; the busy-session items use K5's kept day files |
+| **B5** | 08: I4 → I6 (grid data log spike, post-MVP TODO) · 05: S15 · 08: I5 (pilot, user-led); I3 adds only the registry name | the B5 open questions | pilot "done when" |
+
+**Filler work.** U9, R10, PL5 and PL6 may start as soon as their `depends on:` lines are met, in
+B2 or B3, to keep slots busy while R8, R9 and R11 wait for K3.
+
+**Lean handoff at approval** (auditor): X1, T1 and K2 start. When X1 lands: K1, then U1. When T1
+lands: S1, R1 + PL1, T2. K4 and R0 take the next free slots.
 
 ### Rules for parallel agents
 
@@ -438,6 +445,12 @@ flowchart LR
    at gate 2, not per slice (global "Verifying cheaply").
 5. **Coder on Sonnet** for every slice (D15); reviewer, qa and debugger are batched per the global rules.
 6. **No code before approval.** These batches start only after the user approves this plan.
+7. **Dependencies and the lockfile.** Each task adds the dependencies its sub-plan names to its own
+   `package.json` in one `bun add`, as its first step; later additions go through the leader.
+   `bun.lock` is derived from those files, so the leader owns it: when parallel tasks finish, the
+   leader runs `bun install` once and commits `bun.lock` with the batch. The leader starts parallel
+   tasks that install a few minutes apart. A task that hits a lockfile or `node_modules` error runs
+   `bun install` once more before reporting it.
 
 ### Baseline here, integration there
 
@@ -460,16 +473,23 @@ them. The old master tasks map like this: P1, P1a, P1b → 02; P2 → 03 + 04; P
 P4b (assets) → 04 R10 + 05 S11 + 06 U10; P5 → 07.
 
 - [x] P0 Spike 1: rrweb record and replay basics — owns: `spike/rrweb-demo/` — done: commit 0002.
-- [ ] **Leader, before approval:** one consistency pass over 01–08 (devil), then the `auditor` on
-  the whole plan set (project CLAUDE.md). Findings go into the plans, then the user approves.
-- [ ] **X1 Root scaffold** — owns: root `package.json` (workspaces `apps/*`, `packages/*`, each
-  fixture app and `fixtures/apps/shared/bridge-probe` by explicit path, `spike/*`; scripts
+- [x] **Leader, before approval:** one consistency pass over 01–08 (devil), then the `auditor` on
+  the whole plan set (project CLAUDE.md). Findings go into the plans, then the user approves. Done 2026-11-10: devil in the architect + devil review (0008), auditor pass (0011, see Risks → Auditor pass).
+- [ ] **X1 Root scaffold** — owns: root `package.json` (workspaces `apps/*`, `packages/*`, 
+  `fixtures/apps/*` as a glob (Bun fails on an explicit workspace path that doesn't exist yet, and
+  skips folders without a `package.json`), `spike/*`; the leader adds
+  `fixtures/apps/shared/bridge-probe` when PL5 lands; scripts
   `typecheck`, `lint`, `format`, `test`, `e2e`, `fixtures:build`, `fixtures:serve`,
   `fixtures:e2e`, keeping `spike`, `sync:agents` and `check:agents`), `biome.json`,
   `tsconfig.base.json`, `.gitignore` (allow `*.yaml`, `*.yml`, `*.toml`, `*.cjs`, `*.conf`,
-  `Dockerfile*`, `LICENSE`), `playwright.config.ts`, `test/preload-dom.ts` (the shared happy-dom
+  `Dockerfile*`, `LICENSE`), `playwright.config.ts` (`testDir: 'e2e'`), `test/preload-dom.ts` (the shared happy-dom
   preload) — batch: **B1, first** — depends on: user approval — done when: `bun install`,
   `bun run typecheck`, `bun run lint`, `bun test` and `bun run check:agents` pass at the root.
+- [ ] **X2 Gate-2 e2e specs** (qa, `specs` mode) — owns: `e2e/**`: a host page that loads the built
+  recorder bundles against `apps/server`, and the specs for the Acceptance items above that need a
+  browser — batch: B3 when a slot is free; first run at Gate 2 — depends on: this Acceptance list;
+  03 T2 fixtures — done when: the specs compile and are tagged by area, with a small `@smoke` set;
+  the busy-session seek and Hotspots items read K5's kept day files (02 K5).
   `spike/*` is left out of typecheck and lint.
 - [ ] P6 Pilot hardening: monitoring alerts (05 S12), a written erasure and legal-hold procedure, a backup restore drill with the escrowed key (devil X21),
   and a kill-switch runbook (08 §6–§9) — owner: leader + user — before the pilot.
@@ -575,13 +595,34 @@ needed the user and were answered on 2026-11-10 (A3, A5, A14 + X23, X7 + X26).
 | X25 | Contract gaps closed (kinds, gaps, half-open ranges, anchors with `idx`, no-state rule, frame match, `grep-day`, new recording after 403) | 03, 04, 05, 06, Acceptance |
 | X28, X29 | Stale samples fixed; recorder de-duplicates store names | 02, 04, 05 |
 
+### Auditor pass (2026-11-10)
+
+One auditor run over 01–08, after the open-question round. The goal and every Acceptance list are
+unchanged. The leader applied:
+
+| # | Change | Where |
+|---|---|---|
+| 1 | X1 runs first at approval, and K1 right after it. Before, X1 waited for K1, a spike of unknown length, and X1 gates all of B1. | Batches, 02 K1 |
+| 2 | Dependencies: each task installs first thing, and the leader owns `bun.lock` (rule 7). X1's fixture workspaces use a glob, because Bun fails on an explicit workspace path that doesn't exist yet (checked with Bun 1.4). | Rules, X1 |
+| 3 | New task X2 (qa): the gate-2 host page and specs in `e2e/**`, which had no owner. K5 records into `apps/server` and keeps its day files, so one run serves both K5 and the gate's busy-session seek and Hotspots items. | Tasks, 02 K5 |
+| 4 | K2 builds the startup and seek modes that K5 needs, and takes R0's checks 3 (LoAF attribution) and 5 (worst seek). R0 no longer waits for K1 and K2; R3 waits for R0. | 02 K2, 04 R0, R3 |
+| 5 | R1 and PL1 run as one coder run. | 04, 07 |
+| 6 | K3 decides three things. Whether to defer R9 (the user's call then). Whether R11 builds only the outputs, in R10's run, if the main-thread pipeline stays; 04's worker Acceptance item now says "only if P1 turned the worker on", matching D11 and 01 Acceptance. And S13 waits for K3 and runs once. | Q19, 04, 05 |
+| 7 | K2 ships `summarize.ts`, which prints the results table and the derived limits. I3's publish dry run moves to B4 as a leader command; B5 adds only the registry name. | 02, 08 |
+| 8 | B2 and B3 are reviewed per lane group, while that lane builds its next slice. Gate 1's review runs on opus, because it includes the T1 contracts. | Batches |
+| 9 | PL5 and PL6 run as one coder run if K4 was clean. | 07 |
+| 10 | The batch table matches the `depends on:` lines (∥ = no order between them). U9, R10, PL5 and PL6 are filler work. U1 depends on X1. K1 owns `spike/gate-check/`. | Batches, 02, 06 |
+
+Rejected, as the auditor also advised: running server slices in parallel; merging the tasks that
+were split on purpose (T1+T2, S3a+b, S5a+b, U4a+b, R7a+b); trimming K5's runs; merging I1 and I2.
+
 ## Open questions
 
 Answered by the user on 2026-11-10 in a one-by-one round (Q24–Q42). What is still open:
 
 | # | When | Question | Status |
 |---|---|---|---|
-| 19 | after P1 | The busiest desk doesn't fit the budget, or its bytes per minute are far above the first assumption | First levers: the source fixes in D32 (cell renderer `refresh()`, hidden grids suspended), then D36 rate caps, then a larger budget or more storage for that desk. If `full` fits at S2 without caps, R9 may be deferred. Decided with P1's numbers |
+| 19 | after P1 | The busiest desk doesn't fit the budget, or its bytes per minute are far above the first assumption | First levers: the source fixes in D32 (cell renderer `refresh()`, hidden grids suspended), then D36 rate caps, then a larger budget or more storage for that desk. If `full` fits at S2 without caps, the leader asks the user at K3 whether to defer R9, with its Rate-caps Acceptance items and spec, to v2. If the main-thread pipeline stays at or under 0.5 % CPU (D11), R11 builds only the outputs, in R10's run. Decided with P1's numbers |
 | 36 | before B5 | Internal npm registry and package scope (keep `@sr`?); image registry and per-region promotion | Not decided yet (user) |
 | 37 | before B5 | Block storage class and VolumeSnapshotClass per cluster; object storage for closed day files and backups | Not known yet (user); the startup check refuses network filesystems anyway |
 | 40 | before B5 | Pilot region, desk and first 2–3 users | Decide later (user) |
@@ -760,3 +801,4 @@ Q14 (performance wins, with a source fix raised: D8, D32), Q15 (asset cache behi
   captured in the MVP (D39, Q39); the Node 22 check moves to the B5 dry run (Q41); alert hours
   08:00–18:00 local (Q42). Still open, before B5: Q36, Q37, Q40; after P1: Q19.
 - 2026-11-10 — Post-MVP TODO added (user): a grid data log, AG Grid rows logged like Redux state. A small spike in the B5 dry run (08 §13, task I6) decides it; open question Q43. No change to v1 scope or Acceptance.
+- 2026-11-10 — Auditor pass applied (leader): X1 first and K1 right after it; rule 7 for dependencies and `bun.lock`; X1's fixture workspaces as a glob; new X2 (gate-2 e2e specs in `e2e/**`) fed by K5's kept day files; K2 takes the startup and seek modes and R0's checks 3 and 5, so R0 runs at approval; R1 + PL1 one run; K3 decides R9's deferral, R11 as outputs only, and S13 runs once; `summarize.ts`; I3 to B4; per-lane-group reviews in B2–B3 and an opus Gate 1 review; batch table matches the dependencies, with filler work and a lean handoff. Goal and Acceptance unchanged.

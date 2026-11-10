@@ -537,7 +537,7 @@ On a branch `sr/dry-run` of the real workspace, against a dev namespace:
 6. Write `docs/integration/dry-run-report.md`: every guide step that was wrong or missing, the
    real versions for §10, and any open question answered. Fix the guide in the same change.
 7. Don't merge the branch. The pilot integration is a separate, reviewed change.
-8. If time allows, run the grid data log spike on the same branch (§13, task I6; post-MVP TODO).
+8. Then run the grid data log spike on the same branch (§13, task I6; post-MVP TODO).
 
 ### 13. Later: grid data log (spike in the real workspace, task I6)
 
@@ -700,7 +700,7 @@ only reads the bridge.
 
 - [ ] **I1 Examples** — owns: `examples/**` — batch: B4 — depends on: 07 PL5–PL6 fixture apps; 04's recorder options; 05's config format — done when: `examples/{webpack5-host,vite7-remote,gateway,config}` exist; `bun test examples` parses each and checks plugin order.
 - [ ] **I2 Guide pages** — owns: `docs/integration/**` (except the dry-run report) — batch: B4 — depends on: I1 — done when: §1–§12 exist as pages; every sample is labelled; a link check passes; reviewer passes.
-- [ ] **I3 Publish dry run** — owns: `docs/integration/publishing.md` — batch: B5 — depends on: the 04 and state-plugin package builds — done when: `bun publish --dry-run` for each package lists only `dist/` and `package.json`; the page records the real registry once the user names it. (Package `files` and `publishConfig` belong to those packages' plans.)
+- [ ] **I3 Publish dry run** — owns: `docs/integration/publishing.md` — batch: B4, a leader command once the package builds exist (04 R11, 07 PL4); I2 writes the page around its output, and B5 adds only the registry name — depends on: the 04 and state-plugin package builds — done when: `bun publish --dry-run` for each package lists only `dist/` and `package.json`; the page records the real registry once the user names it. (Package `files` and `publishConfig` belong to those packages' plans.)
 - [ ] **I4 Real-workspace dry run** — owns: branch `sr/dry-run` in the real workspace; `docs/integration/dry-run-report.md` here — batch: B5 — depends on: I1–I3; a dev namespace with the server image — done when: §12 is complete and §8 passes. Run by the leader with the user, not a coder slice.
 - [ ] **I6 Grid data log spike (post-MVP TODO)** — owns: the `gridLog` helper on branch `sr/dry-run` in the real workspace; the "Grid data log" section of `docs/integration/dry-run-report.md` here — batch: B5, after I4 — depends on: I4 steps 1–5 working — done when: the §13 checklist is ticked, its numbers are in the report, and 01 Q43 has an answer. Run by the leader with the user, not a coder slice; no baseline package changes.
 - [ ] **I5 Pilot rollout** — owns: region config (stages 0–2) — batch: B5 — depends on: I4; DPIA and staff notice — done when: stage 2's exit criteria are met. User-led.
@@ -739,3 +739,4 @@ After the B5 spike (01 Q43): log AG Grid data like Redux state, and which way (�
 - 2026-11-10 — Architect and devil review merged (leader): the gateway proxies `/sr/` to the ingest port 3000 only; the replay UI is on its own hostname and port 3002, with a NetworkPolicy per port (L3, §2c, §7; X15). Kill switch in about 2 min through the ConfigMap and about 20 s through the `oc exec` override, with the command and the lift order; legal holds in the ConfigMap; erasure is the runbook in 05 (§5, §6; A14, X23). The §8 secrets check follows D18's wider list and narrower URL rule, searched in the pod with `grep-day` (X7, X26, X25). New §4b source fixes before rate caps: renderer `refresh()` with `nodeValue`, flash off, hidden-tab grids suspended (D32, A2). Troubleshooting rows for 403 `write-key`, 400 `ui-header`, "screen unknown" bands and a missing gate patch. Body limit 4 MiB to start (X10).
 - 2026-11-10 — Open questions answered (user): Node.js proxy in front of the host; `window.userId`; no host CSP; built-in MF plugin; one central config team; no `data-sr-app` marking; Node 22 check in the B5 dry run.
 - 2026-11-10 — Post-MVP TODO added (user): a grid data log, AG Grid rows logged like Redux state. New §13 with options A–D (replay DOM, snapshots, coalesced row log, every update), a spike sample that reuses the MVP bridge unchanged, and a spike checklist; task I6 runs it in the B5 dry run after I4.
+- 2026-11-10 — Auditor pass (01): I3's publish dry run moves to B4 as a leader command; B5 adds only the registry name.
