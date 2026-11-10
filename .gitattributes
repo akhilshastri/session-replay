@@ -1,0 +1,2 @@
+# Keep LF in the repo and in every checkout, whatever core.autocrlf says (bash scripts break on CRLF).
+* text=auto eol=lf

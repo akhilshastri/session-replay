@@ -5,6 +5,7 @@
 
 # Allowed file types
 !.gitignore
+!.gitattributes
 !*.md
 !*.json
 !*.ts
