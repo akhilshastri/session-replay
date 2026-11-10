@@ -12,7 +12,8 @@ everything the user saw: the screen via rrweb, plus Redux state, network calls a
 timeline. A Bun + Hono + SQLite server stores it, one deployment per region, and support staff
 replay it in a web UI.
 
-- **Status: planning.** No product code until the user approves the plan.
+- **Status: planning.** No product code until the user approves the plan. v1 (the pilot) is plans
+  02–08; MVP2 (analytics infrastructure, after the pilot) is plan 09.
 - This repo is the **baseline**. The real integration happens later in the user's own workspace
   (webpack 5 host + Vite 7 module-federation remotes, Redux + React `useState`, flexlayout-react +
   AG Grid, on-prem OpenShift).
@@ -24,8 +25,8 @@ Every task comes from a plan file. Start with the master, then your sub-plan:
 | Plan | Covers |
 |---|---|
 | `plan/01-session-replay.md` | **Master:** goal, scope, decisions D1–D44, batches B0–B5, open questions, risks; tasks X1–X2 |
-| `plan/02-spikes.md` | Performance spike, rrweb gate patch, module-federation spike; tasks K1–K4 |
-| `plan/03-protocol.md` | **Shared contracts:** events, ingest, config, bridge, query API; tasks T1–T2 |
+| `plan/02-spikes.md` | Performance spike (incl. console load), rrweb gate patch, module-federation spike; tasks K1–K5 |
+| `plan/03-protocol.md` | **Shared contracts:** events (incl. `sr:console`), ingest, config, bridge, query API, `@sr/protocol/secrets`; tasks T1–T2 |
 | `plan/04-recorder.md` | `packages/recorder-engine`, `packages/recorder`; tasks R0–R11 |
 | `plan/05-server.md` | `apps/server`, `deploy/openshift`; tasks S1–S15 |
 | `plan/06-replay-ui.md` | `apps/replay-ui`; tasks U1–U10 |
@@ -41,10 +42,11 @@ stop and ask.
 | Folder | What lives there |
 |---|---|
 | `apps/` | `server` (Bun + Hono + SQLite; also serves the replay UI), `replay-ui` (TanStack Router SPA). |
-| `packages/` | `protocol` (shared zod contracts), `recorder-engine` (the only rrweb importer), `recorder` (browser recorder), `state-plugin` (unplugin build plugin). |
+| `packages/` | `protocol` (shared zod contracts; entries `.`, `/publish` and `/secrets`, the last two with no imports), `recorder-engine` (the only rrweb importer), `recorder` (browser recorder), `state-plugin` (unplugin build plugin). |
 | `fixtures/apps/` | Apps that imitate the real workspace, for tests. |
 | `deploy/openshift/` | Per-region manifests. |
 | `docs/integration/`, `examples/` | Integration guide material. |
+| `e2e/` | Gate-2 browser specs and their host page (task X2); `e2e/analytics/` in MVP2. |
 | `spike/` | Throwaway experiments. Never imported by `apps/` or `packages/`. |
 | `plan/` | Plan files. **Only the lead/planning session edits them**; coding agents report changes instead. |
 | `scripts/` | Repo tooling (e.g. `sync-agent-context.ts`). |
@@ -60,14 +62,15 @@ stop and ask.
 
 ## Hard rules
 
-1. **Contract first.** Shapes that cross a boundary live in `packages/protocol` (plan 03). Changes there are **additive only** and need the plan owner's approval.
+1. **Contract first.** Shapes that cross a boundary live in `packages/protocol` (plan 03). Changes there are **additive only** and need the plan owner's approval. The recorder and app bundles import only the zod-free entries (`@sr/protocol/publish`, `@sr/protocol/secrets`) or use `import type`.
 2. **Only `packages/recorder-engine` imports rrweb.** Pin every `@rrweb/*` package to one exact version.
 3. **The recorder has no framework dependencies.** No React and no state libraries: it runs outside every mini-app.
-4. **Never record secrets:** password fields, one-time codes, auth tokens (JWT/`Bearer`, `token`-style URL parameters) and secret-named state keys. Mask or strip them in the browser before anything is sent. In the MVP everything else is recorded unmasked on purpose (plan 01, D18).
-5. **App performance first.** The recorder must stay inside the budget in plan 01 → Acceptance → Performance. When in doubt, it pauses and shows a band.
+4. **Never record secrets:** password fields, one-time codes, auth tokens (JWT/`Bearer`, `token`-style URL parameters, passwords in URLs) and secret-named keys, in state **and in console lines** (D43). Mask or strip them in the browser before anything is sent. Use `isSecretKey` and `maskCutToken` from `@sr/protocol/secrets`; never copy the list. In the MVP everything else is recorded unmasked on purpose (plan 01, D18).
+5. **App performance first.** The recorder must stay inside the budget in plan 01 → Acceptance → Performance. When in doubt, it pauses and shows a band. Anything that runs per app call (the console wrapper, the DOM probe) applies its limit **before** it formats or queries, and passes straight through while recording is paused.
 6. **Replay never runs app code or fires live requests.** The rrweb Replayer stays sandboxed, and the replay UI sends a strict CSP. Never enable `UNSAFE_replayCanvas`.
 7. **The server acks only after commit.** SQLite needs local block storage, never NFS/CephFS.
 8. **One owner per file among tasks that run at the same time.** Shared root files (`package.json`, `tsconfig.base.json`, `.gitignore`) change only through the root scaffold task (X1), a task whose `owns:` names them, or the plan owner.
+9. **Long-lived data holds no free text** (MVP2, plan 09). Analytics summaries are kept 13 months: name things by stable ids (grid and column ids, `data-sr-*`, aria labels), never by cell or link text, and keep example text only in the 30-day tables. Analytics stays off (`analytics.extract`, `analytics.api`) until access is decided.
 
 ## Code style
 
