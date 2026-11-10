@@ -1,5 +1,5 @@
 # 09 — Analytics infrastructure (MVP2)
-Status: draft v2 (reviewed: architect, devil, auditor; MVP2 starts after the v1 pilot) · Size: large
+Status: draft v2 (reviewed: architect, devil, auditor; MVP2 starts after the v1 pilot) · Size: large · Parent: [01-session-replay.md](01-session-replay.md)
 
 ## Goal
 

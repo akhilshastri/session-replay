@@ -8,7 +8,7 @@
 ## What this project is
 
 A session-replay tool for our module-federation React apps. A recorder in the browser captures
-everything the user saw: the screen via rrweb, plus Redux state and network calls, in one
+everything the user saw: the screen via rrweb, plus Redux state, network calls and console messages, in one
 timeline. A Bun + Hono + SQLite server stores it, one deployment per region, and support staff
 replay it in a web UI.
 

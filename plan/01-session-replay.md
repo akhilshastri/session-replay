@@ -1,10 +1,11 @@
 # 01 — Session replay
-Status: draft v3 (split into sub-plans 02–08; awaiting approval) · Size: large
+Status: draft v4 (v1: sub-plans 02–08; MVP2: 09; reviewed by architect, devil and auditor; awaiting approval) · Size: large
 
 ## Goal
 
 Support and audit staff can open any user's session for a given day and replay it: the screen,
-the app state and the network calls, in one timeline. Sessions come from our module-federation
+the app state, the network calls and the console messages (D43), in one timeline. Later (MVP2,
+D44), the same data answers questions across users, such as top errors or tab usage. Sessions come from our module-federation
 React apps (webpack and Vite, React 17/18/19; plain Redux in the MVP, D39). Recording must
 never make those apps noticeably slower. Recorded users are **internal staff only** (D19).
 
@@ -851,3 +852,4 @@ Q14 (performance wins, with a source fix raised: D8, D32), Q15 (asset cache behi
 - 2026-11-10 — Auditor pass applied (leader): X1 first and K1 right after it; rule 7 for dependencies and `bun.lock`; X1's fixture workspaces as a glob; new X2 (gate-2 e2e specs in `e2e/**`) fed by K5's kept day files; K2 takes the startup and seek modes and R0's checks 3 and 5, so R0 runs at approval; R1 + PL1 one run; K3 decides R9's deferral, R11 as outputs only, and S13 runs once; `summarize.ts`; I3 to B4; per-lane-group reviews in B2–B3 and an opus Gate 1 review; batch table matches the dependencies, with filler work and a lean handoff. Goal and Acceptance unchanged.
 - 2026-11-10 — Console and analytics brainstorm (user, architect): D43, console capture in v1 (all levels possible; `error` and `warn` on by default; rows in the action list; `console.error` counts as an error). D44, analytics infrastructure in MVP2 (new plan 09): the server derives facts at ingest, `analytics.db` with 30-day facts and 13-month summaries, backfill, the `$dom` tab reader from DOM labels (open and visible), recorded users only, a query API and CLI with saved queries, no page; access decided at MVP2 start. New Scope and Acceptance lines; 09 in the sub-plan table.
 - 2026-11-10 — Console and analytics review merged (leader; architect, devil, auditor). Devil blockers B1 (console secrets) and B2 (console cost) fixed in D43, 03, 04 and 02; B3 and B4 fixed in 09. New Performance and Privacy Acceptance cases for console; the error badge counts uncaught plus console errors, once each. User: visible tab time is recorded from MVP2 start; console capture follows the record/replay rules (no separate expiry). See Risks → "Console and analytics review".
+- 2026-11-10 — Status draft v4 (leader): the Goal names console messages (D43) and the MVP2 analytics follow-up (D44); 09 links its parent.
