@@ -30,6 +30,7 @@ Inherits D2, D5, D11, D16, D20, D22, D29, D33, D36 from the parent plan. Local d
 | L12 | **Every `t` on the wire and in query DTOs is raw client time** (`Date.now()` ms in the recorded browser), the same clock rrweb uses. `SessionDetail` gives one `clockOffsetMs` per recording; the UI adds it only for display and seeks by raw `t`. | A per-chunk skew correction jitters with network latency and isn't monotonic; mixing corrected and raw times would put markers minutes off (devil X2). |
 | L13 | **A write key per recording.** The recorder makes a random key per recording, keeps it in memory, in sessionStorage and in each queued batch row (another tab may upload leftovers), and sends it as `X-SR-Write-Key`. The server stores its hash with seq 0 (if seq 0 never arrives, with the first stored batch); later batches of that recording must match. It is not an identity token. | Session ids are visible in the session list, so without it anyone on the network could append batches to a colleague's live recording (devil X16). |
 | L14 | **`/api/*` requires the header `X-SR-UI: 1`.** | The replay iframe can request same-origin images and styles, but it can't add headers, so a forged recording can't call the API with the viewer's cookie (devil X14). |
+| L15 | **Console lines are `sr:console` events** (D43). Only `error` and `warn` lines become server action rows; `info`, `log` and `debug` stay in the chunks and reach the action list as local rows (06-L14). `counts.errors` adds `console.error` lines. | Keeps the sparse action index small when a region turns on the chatty levels. |
 
 ## Design
 
@@ -73,11 +74,13 @@ export const StreamPos = z.object({
   idx: z.number().int().min(0),   // event index within the batch
 });
 
+export const ConsoleLevel = z.enum(['error', 'warn', 'info', 'log', 'debug']); // D43
+
 // Our custom event tags. rrweb's own event types (0–6) pass through untouched.
 export const SrTag = z.enum([
   'sr:click', 'sr:input', 'sr:nav', 'sr:error', 'sr:report',
   'sr:state', 'sr:fidelity', 'sr:hotspot', 'sr:asset', 'sr:meta', 'sr:rate-caps',
-  'sr:net', 'sr:redacted', 'sr:close',
+  'sr:net', 'sr:redacted', 'sr:close', 'sr:console',
 ]);
 
 export const FidelityReason = z.enum([
@@ -108,7 +111,10 @@ export const SrPayload = {
   'sr:input':    z.object({ field: z.string(), value: z.string(),          // secrets → '****' (D18)
                             app: z.string().optional() }),
   'sr:nav':      z.object({ url: z.string() }),                              // token params stripped
-  'sr:error':    z.object({ message: z.string(), stack: z.string().optional() }),
+  'sr:error':    z.object({ message: z.string(), stack: z.string().optional(),
+                            count: z.number().int().optional() }),            // repeats folded (D43)
+  'sr:console':  z.object({ level: ConsoleLevel, message: z.string(),       // args formatted, ≤ maxChars, scrubbed (D18)
+                            stack: z.string().optional(), count: z.number().int().optional() }), // D43, L15
   'sr:report':   z.object({ note: z.string().optional() }),
   'sr:state':    z.object({
     store: z.string(), kind: z.literal('redux'),
@@ -249,6 +255,8 @@ export const RecorderConfig = z.object({
   rateCaps: RateCaps.default({}),
   assetCache: z.object({ enabled: z.boolean(), allow: z.array(z.string()) }), // D33
   pipeline: z.enum(['main', 'worker']).default('main'),                      // D11
+  console: z.object({ levels: z.array(ConsoleLevel), maxPerSec: z.number().int(), maxChars: z.number().int() })
+    .default({ levels: ['error', 'warn'], maxPerSec: 10, maxChars: 2000 }), // D43
 });
 ```
 
@@ -260,6 +268,7 @@ Sample served config for the pilot desk:
   "budget": { "cpuPct": 3, "longFrameMs": 50, "resumeAfterMs": 10000 },
   "rateCaps": { "positions": { "bid": 2, "ask": 2, "mid": 2 } },
   "assetCache": { "enabled": false, "allow": ["/static/img/", "https://fonts.corp.example/"] },
+  "console": { "levels": ["error", "warn"], "maxPerSec": 10, "maxChars": 2000 },
   "pipeline": "main" }
 ```
 
@@ -347,6 +356,7 @@ export const SessionSummary = z.object({
   startedAt: z.number(), endedAt: z.number(),             // raw client ms (L12)
   days: z.array(Day),                                     // the UTC days the session touches
   live: z.boolean(),                                      // a batch arrived in the last 2 min
+  // counts.errors = sr:error events + console.error lines (L15)
   counts: z.object({ errors: z.number().int(), failedReqs: z.number().int(), reports: z.number().int(),
                      bands: z.number().int(), missingBatches: z.number().int() }),
   identity: z.literal('client-asserted'),                 // D20: nothing checked the user id
@@ -382,12 +392,14 @@ export const AccessReq = z.object({
   name: z.string().min(2).max(80), reason: z.string().min(3).max(200),
 });
 
-export const ActionKind = z.enum(['click', 'input', 'nav', 'error', 'net', 'fidelity', 'report', 'hotspot']);
+export const ActionKind = z.enum(['click', 'input', 'nav', 'error', 'net', 'fidelity', 'report', 'hotspot', 'console']);
 export const ActionRow = z.object({
   pos: StreamPos, t: z.number(), kind: ActionKind,
   name: z.string(), summary: z.string(),
   failed: z.boolean().optional(),                         // net: status 0 or ≥ 400 (only failed net rows are stored); errors
   app: z.string().optional(),                             // reserved; not filled in the MVP (01 Q27)
+  level: ConsoleLevel.optional(),                         // console rows: error or warn from the API (L15)
+  count: z.number().int().optional(),                     // console and error rows: folded repeats
 });
 export const ActionPage = z.object({ items: z.array(ActionRow), next: PosKey.nullable() }); // next → `after`
 
@@ -507,3 +519,4 @@ Every package tests against these fixtures, so parallel work meets at the same s
   (X1, X19); `no-state` rule; `checkpointMutations` (A5); 5 s cadence (A10); limits derived from
   P1 (A1).
 - 2026-11-10 — Open-question answers (user): `sr:meta` gains `tz` and `tzOffsetMin` for the recorded user's local time (D42); the viewer grant covers every session in that browser for 8 h, so `AccessReq.sessionId` is optional (D38); `app` on clicks, inputs and action rows is reserved, not filled in the MVP (Q27).
+- 2026-11-10 — Console capture (01 D43): `ConsoleLevel`, the `sr:console` tag and event, `count` on `sr:error`, `RecorderConfig.console` (default `error` and `warn`, 10/s, 2,000 chars), `ActionKind` `console` with `level` and `count` on `ActionRow`, `counts.errors` includes `console.error`; L15: only `error` and `warn` become server action rows. All additive. MVP2 analytics contracts (`Fact`, `AnalyticsQuery`, `AnalyticsResult`, `domProbes`) are added additively at MVP2 start (09 AN0).

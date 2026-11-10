@@ -380,6 +380,11 @@ change. A cap lowers audit fidelity, so the replay shows it in the legend (D36),
 `"positions": { "bid": 2, "ask": 2, "mid": 2 }`. Caps work only in a recorder built with the rrweb
 gate patch (D23); without it the replay says caps are off (§9).
 
+**Console levels (D43).** The region config's `console.levels` defaults to `["error", "warn"]`. To
+debug a desk, the central team adds `"log"` (or `"info"`, `"debug"`) and bumps `version`; it
+applies from each user's next page load. Turn it back afterwards, because the chatty levels cost
+upload bytes.
+
 ### 6. Rollout playbook
 
 | Stage | Who records | Exit criteria | Watch |
@@ -495,6 +500,7 @@ One namespace per region, same image digest (L4). The YAML is in `05-server.md`
 | | cell flash doubles the mutations | grid options | turn flash off on the fastest columns (§4b) |
 | **Rate caps don't apply** (capped columns record every tick; the replay says caps are off) | the recorder was built from an rrweb without the gate patch (D23), e.g. after an upgrade where the patch didn't re-apply | the replay's rate-cap legend and band; `patches/` and `patchedDependencies` for the pinned rrweb version | rebuild the recorder with the patch re-applied (02 K1). Until then the self-budget still pauses with a band (D8) |
 | **Region mix-up** (sessions in the wrong UI) | the gateway points at another region's Service | §2c `proxy_pass` host | point each region's gateway at its own namespace |
+| **DevTools shows `sr-recorder.js` as the source of every console line** | the source map isn't loaded | DevTools → Settings → Ignore list | serve the bundle's `.map` (it carries `x_google_ignoreList`), or add `sr-recorder.js` to the ignore list by hand |
 
 ### 10. Compatibility matrix
 
@@ -740,3 +746,4 @@ After the B5 spike (01 Q43): log AG Grid data like Redux state, and which way (�
 - 2026-11-10 — Open questions answered (user): Node.js proxy in front of the host; `window.userId`; no host CSP; built-in MF plugin; one central config team; no `data-sr-app` marking; Node 22 check in the B5 dry run.
 - 2026-11-10 — Post-MVP TODO added (user): a grid data log, AG Grid rows logged like Redux state. New §13 with options A–D (replay DOM, snapshots, coalesced row log, every update), a spike sample that reuses the MVP bridge unchanged, and a spike checklist; task I6 runs it in the B5 dry run after I4.
 - 2026-11-10 — Auditor pass (01): I3's publish dry run moves to B4 as a leader command; B5 adds only the registry name.
+- 2026-11-10 — Console levels (01 D43): how the central team turns on more levels per region, and a troubleshooting row for the DevTools call site. MVP2 tab facts come from the `$dom` probe (09), not the host snippet.

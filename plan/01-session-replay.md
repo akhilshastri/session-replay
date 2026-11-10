@@ -18,6 +18,7 @@ never make those apps noticeably slower. Recorded users are **internal staff onl
 
 **v1 (user, 2026-11-10): the devil's MVP cut, plus the build plugin.** One staff app on one desk
 as the pilot.
+- **Console:** console lines are recorded (`error` and `warn` by default; the other levels by config) and shown as rows in the replay's action list (D43).
 - **Recording:** `full` everywhere, pause-with-band. Everything is recorded except secrets (D18). Network capture is method, URL, status and timing only.
 - **Build plugin:** **plain Redux** capture only. The pilot apps use Redux + React `useState`, with no RTK, Zustand or TanStack Query (user, 2026-11-10). `useState` is covered visually by the screen recording (D39).
 - **Delivery:** upload pipeline behind `post(batch)` (main thread first, D11), `recordingId` + `seq`, write-ahead IndexedDB queue, kill switch.
@@ -40,6 +41,7 @@ Per-column recording rate caps (D36) are in v1 as a mechanism, with no caps by d
 - Vite 8 (Rolldown) support for the build plugin; the MVP targets Vite 7.
 - a mini-app filter in the replay UI's action list (user, Q27): actions from all apps show together;
 - state capture for Redux Toolkit `configureStore` stores (D39);
+- **analytics infrastructure (MVP2, plan 09, D44):** facts derived at ingest, `analytics.db`, backfill, the `$dom` tab reader, and a query API and CLI with saved queries. The query page comes after MVP2;
 - a **grid data log**, AG Grid rows logged like Redux state (user, 2026-11-10): a TODO. A small spike in the B5 dry run decides whether and how (08 §13, I6, Q43).
 
 The app loads only after a successful login, so the user id is known before the recorder starts (user, Q25).
@@ -92,6 +94,8 @@ IDs are kept stable across revisions so reviews can refer to them.
 | D40 | **Repo tooling for the baseline:** Biome (one root `biome.json`) for lint and format; `bun test` for unit tests, with a happy-dom preload for browser packages and `fake-indexeddb` for the queue; Playwright (through `bunx`) for e2e, tagged by area. Each is pinned to the newest release at least 2 weeks old. Set up by the B1 root scaffold (X1). | One fast tool per job, all runnable with Bun, so tier-1 checks stay cheap for every slice. | leader |
 | D41 | **WebSocket traffic is not recorded** (user, 2026-11-10, Q28). The apps receive market data over AMPS WebSockets; the recorder never wraps `WebSocket`. What the data does is captured by the screen recording (and by Redux where it lands there). No other replay or monitoring tool runs on the pilot pages. | The UI is recorded exactly (D16), so the raw feed adds volume and cost without audit value. | user |
 | D42 | **The replay shows the recorded user's local time**, with UTC on hover (user, 2026-11-10, Q29). The recorder adds the user's IANA time zone and UTC offset to `sr:meta`; the UI shows `t + clockOffsetMs` in that zone. | Support works from what the user reports ("it happened at 9:05"). UTC on hover matches server logs. | user |
+| D43 | **Console capture in v1** (user, 2026-11-10). Every level can be recorded (`error`, `warn`, `info`, `log`, `debug`). Only `error` and `warn` are on by default; the others are switched on per region in config (`console.levels`). The recorder wraps those console methods and calls the original first with the same arguments. Each line is cut to about 2 KB, passes the D18 scrubber, folds repeats into a `count`, and is rate-limited. It becomes an `sr:console` event, shown as a row in the replay's action list with a level filter; `console.error` lines also count toward the session's error badge. | Errors caught by a React error boundary, and errors the app logs itself (AMPS client, handled fetch failures), never reach `window.onerror`, so `sr:error` alone misses them. | user |
+| D44 | **Cross-session analytics: infrastructure in MVP2, not v1** (user, 2026-11-10; plan [09](09-analytics.md)). The server derives facts from each upload at ingest (architect option c) into `analytics.db`: raw facts for 30 days, daily summaries for 13 months, and a backfill job. Tabs are read from the page with config selectors into a built-in `$dom` store (labels; open and visible). Only recorded users are covered. A query API and CLI run saved query specs; the query page comes later. Who may query is decided at MVP2 start, with the DPIA update. v1 adds only console capture (D43), and ingest walks each batch once so `extract()` can plug in later. | The tool grows from support replay into usage and error analytics without a second pipeline, without extra browser work, and without a recorder release per new question. | user, architect |
 
 ## Design
 
@@ -350,6 +354,7 @@ Two packages: `packages/recorder-engine` (the only rrweb importer, D25) and `pac
 - [ ] The replay iframe makes no network request except `/assets/<sha256>` (strict CSP). A forged recording with relative URLs can't reach `/api/*` (no `X-SR-UI` header) or the ingest port (D30).
 - [ ] Someone else's batch for an existing recording is refused (write key, 403), and a flood under one userId from another IP can't use up that user's quota (devil X16).
 - [ ] Opening a session without a name and reason is blocked; the access log records the name, reason, IP and session.
+- [ ] A JWT or `Bearer` value printed with `console.warn` or `console.error` is scrubbed before it leaves the browser (D43, D18).
 
 **Build plugin:**
 - [ ] Plain Redux actions are captured for React 17 + webpack 5, React 18 + Vite 7 and React 19 + Vite 7. That includes actions dispatched through thunk or saga middleware, and reducers added later with `replaceReducer`.
@@ -363,6 +368,7 @@ Two packages: `packages/recorder-engine` (the only rrweb importer, D25) and `pac
 **Replay:**
 - [ ] List by user and date; play/pause, back/next, all speeds, scrubber, deep link, state panel.
 - [ ] Empty, loading and error states.
+- [ ] Console lines show as rows in the action list, with a level icon, the message and a repeat count, and a level filter. `console.error` lines count toward the session's error badge. With the default config only `error` and `warn` are recorded. Adding `log` to `console.levels` records `console.log` lines from the next page load. The app's own console output and behaviour are unchanged (D43).
 - [ ] A seek in a busy 8-hour session takes under 2 s. On the busiest desk it may take longer, with a progress bar (user, 2026-11-10).
 - [ ] Asset cache on: after a redeploy changes an icon and a font, an older session still replays with the old icon and font, and the iframe requests only `/assets/<sha256>` on our origin.
 
@@ -390,6 +396,7 @@ local L-rows. A decision that affects more than one sub-plan is made here.
 | [06-replay-ui.md](06-replay-ui.md) | Router SPA: sessions, player, actions, state, hotspots | `apps/replay-ui/` |
 | [07-state-plugin.md](07-state-plugin.md) | Build plugin (call-site transform) + Redux wrapper + fixture apps | `packages/state-plugin/`, `fixtures/apps/` |
 | [08-integration.md](08-integration.md) | How-to guide for the real workspace: packaging, host setup, build config, grids, rollout | `docs/integration/`, `examples/` |
+| [09-analytics.md](09-analytics.md) | **MVP2, after the pilot:** analytics infrastructure: facts at ingest, `analytics.db`, backfill, `$dom` probe, query API + CLI | `apps/server/src/analytics/`, `packages/recorder/src/dom-probe/`, `packages/protocol/src/analytics.ts` |
 
 ### Batches
 
@@ -618,7 +625,7 @@ were split on purpose (T1+T2, S3a+b, S5a+b, U4a+b, R7a+b); trimming K5's runs; m
 
 ## Open questions
 
-Answered by the user on 2026-11-10 in a one-by-one round (Q24–Q42). What is still open:
+Answered by the user on 2026-11-10 in a one-by-one round (Q24–Q42). The console and analytics round (D43, D44) is answered too; MVP2 analytics questions live in [09](09-analytics.md) → Open questions. What is still open:
 
 | # | When | Question | Status |
 |---|---|---|---|
@@ -802,3 +809,4 @@ Q14 (performance wins, with a source fix raised: D8, D32), Q15 (asset cache behi
   08:00–18:00 local (Q42). Still open, before B5: Q36, Q37, Q40; after P1: Q19.
 - 2026-11-10 — Post-MVP TODO added (user): a grid data log, AG Grid rows logged like Redux state. A small spike in the B5 dry run (08 §13, task I6) decides it; open question Q43. No change to v1 scope or Acceptance.
 - 2026-11-10 — Auditor pass applied (leader): X1 first and K1 right after it; rule 7 for dependencies and `bun.lock`; X1's fixture workspaces as a glob; new X2 (gate-2 e2e specs in `e2e/**`) fed by K5's kept day files; K2 takes the startup and seek modes and R0's checks 3 and 5, so R0 runs at approval; R1 + PL1 one run; K3 decides R9's deferral, R11 as outputs only, and S13 runs once; `summarize.ts`; I3 to B4; per-lane-group reviews in B2–B3 and an opus Gate 1 review; batch table matches the dependencies, with filler work and a lean handoff. Goal and Acceptance unchanged.
+- 2026-11-10 — Console and analytics brainstorm (user, architect): D43, console capture in v1 (all levels possible; `error` and `warn` on by default; rows in the action list; `console.error` counts as an error). D44, analytics infrastructure in MVP2 (new plan 09): the server derives facts at ingest, `analytics.db` with 30-day facts and 13-month summaries, backfill, the `$dom` tab reader from DOM labels (open and visible), recorded users only, a query API and CLI with saved queries, no page; access decided at MVP2 start. New Scope and Acceptance lines; 09 in the sub-plan table.

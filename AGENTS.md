@@ -23,7 +23,7 @@ Every task comes from a plan file. Start with the master, then your sub-plan:
 
 | Plan | Covers |
 |---|---|
-| `plan/01-session-replay.md` | **Master:** goal, scope, decisions D1–D42, batches B0–B5, open questions, risks; tasks X1–X2 |
+| `plan/01-session-replay.md` | **Master:** goal, scope, decisions D1–D44, batches B0–B5, open questions, risks; tasks X1–X2 |
 | `plan/02-spikes.md` | Performance spike, rrweb gate patch, module-federation spike; tasks K1–K4 |
 | `plan/03-protocol.md` | **Shared contracts:** events, ingest, config, bridge, query API; tasks T1–T2 |
 | `plan/04-recorder.md` | `packages/recorder-engine`, `packages/recorder`; tasks R0–R11 |
@@ -31,6 +31,7 @@ Every task comes from a plan file. Start with the master, then your sub-plan:
 | `plan/06-replay-ui.md` | `apps/replay-ui`; tasks U1–U10 |
 | `plan/07-state-plugin.md` | `packages/state-plugin`, `fixtures/apps`; tasks PL0–PL7 |
 | `plan/08-integration.md` | How-to guide for the real workspace; tasks I1–I6 (I6: post-MVP grid data log spike) |
+| `plan/09-analytics.md` | **MVP2:** analytics infrastructure: facts at ingest, `analytics.db`, backfill, `$dom` probe, query API + CLI; tasks AN0–AN7 |
 
 A task's `owns:` list is the set of files you may change. If you need to touch anything else,
 stop and ask.
