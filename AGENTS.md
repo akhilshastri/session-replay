@@ -33,6 +33,7 @@ Every task comes from a plan file. Start with the master, then your sub-plan:
 | `plan/07-state-plugin.md` | `packages/state-plugin`, `fixtures/apps`; tasks PL0–PL7 |
 | `plan/08-integration.md` | How-to guide for the real workspace; tasks I1–I6 (I6: post-MVP grid data log spike) |
 | `plan/09-analytics.md` | **MVP2:** analytics infrastructure: facts at ingest, `analytics.db`, backfill, `$dom` probe, query API + CLI; tasks AN0–AN5, AN7 |
+| `plan/10-health.md` | **v1.1:** AMPS command log (commands and acks, never data messages) and app vitals; draft |
 
 A task's `owns:` list is the set of files you may change. If you need to touch anything else,
 stop and ask.

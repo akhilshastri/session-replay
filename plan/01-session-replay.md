@@ -44,16 +44,12 @@ Per-column recording rate caps (D36) are in v1 as a mechanism, with no caps by d
 - state capture for Redux Toolkit `configureStore` stores (D39);
 - **analytics infrastructure (MVP2, plan 09, D44):** facts derived at ingest, `analytics.db`, backfill, the `$dom` tab reader, and a query API and CLI with saved queries. The query page comes after MVP2;
 - a **grid data log**, AG Grid rows logged like Redux state (user, 2026-11-10): a TODO. A small spike in the B5 dry run decides whether and how (08 §13, I6, Q43).
-- **AMPS feed health (v1.1, brainstorm on hold; user, 2026-11-11).** Goal: in a replay, show whether
-  the AMPS feed was healthy (connects, logons, disconnects with reason, failover, errors, slow
-  consumer, per-client rates) and the **active subscriptions on each connection: topic and filter**.
-  No message bodies or market-data values. Each remote opens its own AMPS client. Lands right after
-  the pilot, as its own sub-plan; the pilot keeps D41. Preferred route (leader, from the AMPS docs):
-  a server-side collector that subscribes to the `/AMPS/ClientStatus` event topic and polls the
-  admin REST API (Galvanometer's), copying events at the time they happen, so the browser runs no
-  extra code. Open: access to production AMPS from the replay server (Q44), how AMPS clients join to
-  sessions (client-name convention, or `auth_id` + `client_address` + time), and the fallback
-  (browser capture) if access is refused.
+- **Health (v1.1, plan 10; user, 2026-11-11):** an **AMPS command log** (every command the UI sends
+  and every ack, plus connection life: connect, logon with credentials stripped, disconnect, reconnect,
+  failover, errors; never data messages) captured in the browser for every remote's client, so a
+  replay shows feed health and the active subscriptions (topic, filter) at the play head; and **app
+  vitals** sampled every 5 s (busy %, long frames, input delay, JS heap, DOM node count). The pilot
+  keeps D41; in v1.1 D41 narrows to "no AMPS data messages".
 
 The app loads only after a successful login, so the user id is known before the recorder starts (user, Q25).
 
@@ -419,6 +415,7 @@ local L-rows. A decision that affects more than one sub-plan is made here.
 | [07-state-plugin.md](07-state-plugin.md) | Build plugin (call-site transform) + Redux wrapper + fixture apps | `packages/state-plugin/`, `fixtures/apps/` |
 | [08-integration.md](08-integration.md) | How-to guide for the real workspace: packaging, host setup, build config, grids, rollout | `docs/integration/`, `examples/` |
 | [09-analytics.md](09-analytics.md) | **MVP2, after the pilot:** analytics infrastructure: facts at ingest, `analytics.db`, backfill, `$dom` probe, query API + CLI | `apps/server/src/analytics/`, `packages/recorder/src/dom-probe/`, `packages/protocol/src/analytics.ts` |
+| [10-health.md](10-health.md) | **v1.1, after the pilot:** AMPS command log (commands and acks, never data) and app vitals (busy %, long frames, heap, DOM nodes) | draft; tasks after the architect |
 
 ### Batches
 
@@ -687,7 +684,7 @@ Answered by the user on 2026-11-10 in a one-by-one round (Q24–Q42). The consol
 | 37 | before B5 | Block storage class and VolumeSnapshotClass per cluster; object storage for closed day files and backups | Not known yet (user); the startup check refuses network filesystems anyway |
 | 40 | before B5 | Pilot region, desk and first 2–3 users | Decide later (user) |
 | 43 | after the B5 spike (08 I6) | Log AG Grid data like Redux state? If so, which way: read the replay DOM, snapshots only, or a coalesced row log? | TODO (user, 2026-11-10). Start with the coalesced row log (08 §13, option C); it reuses the MVP bridge, so the baseline needs no change |
-| 44 | before the v1.1 AMPS sub-plan | May the replay server (per region) subscribe to `/AMPS/ClientStatus` and call the admin REST API on production AMPS? Or admin REST only, or no access (then browser capture)? | On hold (user, 2026-11-11); see Scope → Later, AMPS feed health |
+| 44 | — | Production AMPS access for a server-side collector | Not needed: the user chose browser capture of AMPS commands and acks (2026-11-11, plan 10 M1) |
 
 **Answers from the 2026-11-10 round** (user):
 
@@ -868,3 +865,4 @@ Q14 (performance wins, with a source fix raised: D8, D32), Q15 (asset cache behi
 - 2026-11-10 — Status draft v4 (leader): the Goal names console messages (D43) and the MVP2 analytics follow-up (D44); 09 links its parent.
 - 2026-11-11 — Replay UI redesign (user; dx-ux-designer, architect): D13 now names React Compiler, Mantine 9, the flexlayout-react workspace, light and dark themes, and Vite; D40 adds Vite for `apps/replay-ui` only. 06 gains L16–L25, U0 (mocks in `docs/design/replay-ui/`) and U11, splits U3 and U6, and the batch table follows. No 03 or 04 contract changes; 05 only rewords its build note (Vite, `/ui/*`, `/theme-boot.js`).
 - 2026-11-11 — AMPS feed health brainstorm started and put on hold (user): purpose, scope, timing (v1.1) and the preferred server-side route recorded under Scope → Later; Q44 (access to production AMPS) open. D41 stands for the pilot.
+- 2026-11-11 — Health brainstorm (user): AMPS command log captured in the browser (commands and acks, never data; Q44 no longer needed) and app vitals (slow or frozen, memory, DOM size), both v1.1 in the new plan 10 (`10-health.md`).
