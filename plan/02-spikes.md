@@ -31,8 +31,30 @@ confirmed budget (parent Acceptance → Performance).
 | L5 | **One rrweb pin for everything** (D1, devil X24). At B0 start the leader picks the newest `@rrweb/*` release that is at least 2 weeks old, with every `@rrweb/*` package on that exact version, and logs it here and in 01. The spikes, the K1 patch and production (R1) all use it. | Numbers measured on another version don't hold for production. The patch is version-specific, and Bun applies `patchedDependencies` only to that exact version. |
 | L6 | **Bytes per minute are a headline result:** raw and gzip bytes/min per scenario, plus the full-snapshot size and time. The quota, rate limits, PVC size, ingest body limit and the S1 upload target are derived from them (architect A1, 05-L11). | The sizing in 01 Ops is a first assumption (about 100 KB/min for a busy grid). The architect estimates 1.5–7 MB/min gzip per busy user at S2, so storage and limits can't be set without P1. |
 | L7 | **K5 re-runs the P1 harness on the built bundles** in B4, with the shipped defaults. | Minification, IIFE wrapping, the loader path and the real pipeline can all change the cost. 01's acceptance needs the numbers from what ships (devil X24). |
+| L8 | **K0 profiles the real app first** (user, 2026-11-11, devil blocker): one hour at the busiest desk, in B0, before K3. K2 pins the real AG Grid version and tunes its ticker to K0's mix of DOM change records within ±20 %. | Every budget, limit and deferral comes from P1. A synthetic page that misses the real renderer's change mix (class rules, React cell renderers, CSS-in-JS) would set them all wrong, and the first real check was B5. |
+| L9 | **Go / no-go after K3's S2 headline runs** (architect, 2026-11-11): within budget, go; within 2× of budget, go with the source fixes and caps as planned; worse than 2×, stop and re-plan with the user. Gate 1 waits for these runs (01 Batches). | B2 and B3 build ingest, storage and the pipeline around these numbers; finding a 15–70× miss after they're built is a re-plan, not tuning. |
+| L10 | **Size for 4 windows per user** (user, 2026-11-11). Traders keep the same app open in 2–4 windows across monitors, and every visible window records. The quota, rate limit, PVC and browser queue rules below multiply by 4; K0 checks the real count. | A quota sized for one window runs out mid-afternoon and stops recording until the next UTC day. |
 
 ## Design
+
+### K0 — real-app profile (B0, leader + user; L8)
+
+A coder run writes a DevTools snippet (`spike/k0/profile.js`); the user runs it in the real app at
+the busiest desk during trading hours. It does nothing but count, then prints one JSON object:
+- the AG Grid, React, flexlayout-react and Redux versions (from the page's globals or bundles);
+- DOM node count, mounted grids, rendered rows per grid, hidden mounted tabs;
+- DOM change records per second **by type** (childList, characterData, attributes by attribute
+  name, style-sheet rule inserts) over 5 minutes, from a MutationObserver that only counts;
+- the time and size of one rrweb-style serialisation of `document` (the snippet uses the
+  pinned `@rrweb/snapshot` build, loaded from the local file);
+- whether a hidden tab's viewport datasource keeps mutating (moved here from K2);
+- the number of windows of the app the user has open (L10);
+- the path patterns of images, fonts and CSS backgrounds (D33's allow-list, user 2026-11-11):
+  for example `/` + hashed file names at the webpack output root, or a remote's own origin.
+
+**What leaves the user's machine:** counts, versions and path patterns only. No DOM, text,
+state or URLs with query strings. Hostnames are replaced with placeholders in this plan; the
+real ones go only into the region overlay config (08), never into the repo.
 
 ### P1a — the `mutationGate` patch (K1)
 
@@ -85,7 +107,11 @@ bun patch --commit node_modules/@rrweb/record   # writes patches/@rrweb%2Frecord
 - per row, up to 4 market-data cells at 4 ticks/s, and up to 6 slower cells at about 1/s (*assumption*);
 - ≈ 3,100 cell changes/s with about 35 rows rendered, ≈ 8,800/s with all 100 rendered (upper bounds);
 - **how ticks arrive** (user, Q24): most grids use AG Grid's **Viewport Row Model**. A viewport datasource calls `params.setRowData()` for each AMPS message, and the AMPS subscriptions are **conflated**, so the real rate per cell may be lower than 4/s. **No cell flash.** Only the rows in the viewport are rendered and updated;
-- what the datasource does while its tab is hidden (keeps the viewport subscription or not) is checked against the real app in K2.
+- what the datasource does while its tab is hidden (keeps the viewport subscription or not) is checked against the real app in K0;
+- **the stress page follows K0** (L8): the real AG Grid version, the real cell renderer style
+  (class rules, React renderers) and K0's change mix within ±20 %. The Viewport Row Model is in
+  `ag-grid-enterprise`: the licence key comes from the `AG_GRID_LICENSE_KEY` environment
+  variable, never a file in the repo, and the harness ignores the licence banner if it's unset.
 
 **Scenarios:**
 
@@ -216,21 +242,40 @@ const bytes = await fetch(`${spikeServer}/stats?run=${runId}`).then((r) => r.jso
 
 **Decision rules** (written back into plan 01 and 05 when P1 ends):
 - **Bytes (A1, 05-L11):**
-  - a busy user's day = the S2 gzip median × 60 × 8 h; the daily quota is a fuse at about 3× that;
-  - the per-user rate limit (bytes/min) = the S3 gzip peak minute with 2× headroom;
+  - a busy user's day = the S2 gzip median × 60 × 8 h × 4 windows (L10); the daily quota is a
+    fuse at about 3× that;
+  - the per-user rate limit (bytes/min) = the S3 gzip peak minute × 4 windows, with 2× headroom;
   - the PVC = 01's sizing formula with S1 as the typical user and S2 as the busy one (30 % of
-    users), × 30 days retention, × 2 headroom;
+    users, × 4 windows), × 30 days retention, × 2 headroom;
+  - **the browser queue cap** (architect, devil, 2026-11-11) = the S2 gzip per minute × 4 windows
+    × the outage to cover (target 120 minutes), bounded by half of `navigator.storage.estimate()`
+    on a pilot desktop. 01 Acceptance then states the minutes a busy desk is covered; past them,
+    a `buffer-overflow` band shows the gap;
+  - **S4's threading:** bytes per minute × 50 users × 4 windows gives the ingest rate. If S2's
+    gzip and decode cost at that rate passes about 50 % of a core, S4 builds the prepare worker
+    from the start (05 Risks) instead of waiting for S13;
   - the ingest body limit (starts at 4 MiB, 03) is at least 2× the largest full-snapshot batch,
     gzip; the 16 MiB gunzip cap stays above 2× the largest raw one (devil X10);
   - the S1 upload target in 01 Acceptance = the S1 gzip median + 25 %, so a later regression shows.
+- **Go / no-go** (L9), on recorder off, `full` and the best source fix at S2: within budget, go;
+  within 2× of budget, go with the levers below; worse than 2×, stop and re-plan with the user
+  (D16 itself may go back to the user, Q19).
+- **`cpuPct` calibration** (devil, 2026-11-11): the self-budget adds up its own timed work, while
+  01's budget is the growth in Chrome's `ScriptDuration` (which also counts garbage collection
+  and browser work rrweb causes). K3 measures the ratio between the two across variants and
+  sets `budget.cpuPct` so the self-budget acts at 01's S2 limit (5 %). The sample configs say 3
+  until then.
 - **Budget:** if `full` meets it at S2, there are no default caps and D36 stays a tool for later;
   R9 may be deferred (Q19).
 - **Else, in this order** (D32, Q19): the source fixes that fit go into 08 as the first levers for
   app teams; then default caps per desk from the gate-cap curve; then a larger budget or more
   storage for that desk.
 - **Worker:** on if the main-thread pipeline costs more than about 0.5 % CPU at S2 (D11).
-- **Checkpoints:** if one takes 50 ms or more at S2, tune the snapshot fallback defaults. Check
-  `checkpointMinutes` and `checkpointMutations` against the S2 mutation rate and R0's seek time.
+- **Checkpoints** (architect, devil, 2026-11-11): a full snapshot is one synchronous pass and
+  can't be split. K3 derives `checkpointMutations` from the S2 record rate **and** the snapshot
+  time, not only R0's seek time, and proposes 01's snapshot budget (ms per snapshot, at most one
+  per N minutes at S2) for the user to confirm. The trade is longer seeks on the busiest desk
+  (behind the progress bar) against fewer long frames; D8 says performance wins.
 - **Hidden tabs:** if hidden mounted grids still mutate, "suspend hidden grids" goes first in 08.
 
 ### P1b — module federation call-site transform (K4)
@@ -293,21 +338,31 @@ scenarios as K3, with the defaults K3 chose (caps, worker, checkpoints). The har
 
 ## Acceptance
 
+- [ ] K0: the real-app profile is in this plan (versions, DOM size, grids, change mix by type,
+  snapshot time and size, hidden-tab behaviour, windows per user, asset path patterns) with no
+  hostnames or user data; K2's ticker matches its change mix within ±20 %.
 - [ ] K1: the gate fires on a test page; `mutationGateVersion` is a number and `gateActive` is
   true; records released later replay with zero "node not found" warnings; without the patch
   `gateActive` is false and rate caps switch off (every change is recorded).
 - [ ] P1: a results table for S1/S2/S3 × variants is in this plan, with **raw and gzip
   bytes/min and full-snapshot size and time as headline columns**. The decision rules are applied:
   D11, the D36 defaults, Q19 and the first source fixes are written back to 01 and 08; the quota,
-  rate limit, PVC size, body limit and S1 upload target to 01 and 05.
+  rate limit, PVC size, body limit and S1 upload target to 01 and 05; the queue cap and covered
+  minutes to 01 and 04; the calibrated `cpuPct` to 03, 05 and 08; the proposed snapshot budget
+  to the user. The go / no-go rule (L9) is applied to the S2 headline runs before Gate 1.
 - [ ] P1: the hidden-tab question is answered with evidence; the source-fix variants are ranked by
   cost saved; the hide/show cycles, the audit slice and the console load are measured.
-- [ ] P1b: all "done when" points pass for webpack 5 and Vite 7.
+- [ ] P1b: all "done when" points pass for webpack 5 and Vite 7; the RTK fixture's result is
+  reported (architect, 2026-11-11); one real remote builds with the spike plugin.
 - [ ] K5: the budget, startup time and seek time hold with the built bundles, or each difference
   from K3 is explained and logged (01 Acceptance, devil X24).
 
 ## Tasks
 
+- [ ] **K0 real-app profile** — owns: `spike/k0/` (the snippet and its README) — batch: **B0**,
+  first, parallel with K1, K2 and K4 — depends on: user approval — done when: the K0 acceptance
+  passes. coder writes the snippet (one short run); the user runs it in the real app and pastes the
+  JSON back; the leader records it here.
 - [ ] **K1 P1a gate patch** — owns: `patches/`, `spike/gate-check/` (the test page), root
   `package.json` (`patchedDependencies`), `.gitignore` (allow `*.patch`) — batch: **B0**, parallel
   with K2 and K4 — depends on: user approval, 01 X1, the rrweb pin (L5) — done when: the K1
@@ -315,7 +370,9 @@ scenarios as K3, with the defaults K3 chose (caps, worker, checkpoints). The har
   `.gitignore` (01 rule 3).
 - [ ] **K2 P1 harness** (stress page, ticker, source-fix variants, CDP collector, byte counter,
   `--bundles`, startup and seek modes, console load, `summarize.ts`) — owns: `spike/perf-grid/` except `results/` and `results-built/` — batch: **B0**,
-  parallel with K1 and K4 — depends on: Q24, the rrweb pin (L5) — done when: one variant produces a
+  parallel with K1 and K4 — depends on: Q24, the rrweb pin (L5), K0 for the ticker mix and the
+  AG Grid version (the harness starts before K0 ends) — adds `ag-grid-enterprise` at K0's version
+  (key from `AG_GRID_LICENSE_KEY`, L8) — done when: one variant produces a
   full metrics JSON, including raw and gzip bytes/min and full-snapshot size and time. The cap
   variants are wired, and skip with a note until K1 lands. The startup and seek modes (used again
   by K5) run against the spike recorder and answer 04 R0's checks 3 (LoAF attribution of
@@ -325,12 +382,19 @@ scenarios as K3, with the defaults K3 chose (caps, worker, checkpoints). The har
   size, body limit and S1 upload target by this plan's rules, for the leader to paste into 01, 02
   and 05.
 - [ ] **K3 P1 measurement runs + soak** — owns: `spike/perf-grid/results/` — batch: **B0** —
-  depends on: K2; K1 for the cap variants — done when: the P1 acceptance items pass. The leader
+  depends on: K2; K1 for the cap variants — done when: the P1 acceptance items pass. **The S2
+  headline runs come first** (recorder off, `full`, the best source fix: main-thread %, long
+  frames, gzip bytes/min, snapshot time and size, the audit slice's serializer time; a few hours)
+  and gate Gate 1 through L9; the sweeps and the 8-hour soak follow while B1 runs. The leader
   runs the long runs in the background with Bash; no agent sits idle during the 8-hour soak.
 - [ ] **K4 P1b MF transform spike** — owns: `spike/mf-plugin/` — batch: **B0**, parallel with K1
-  and K2 — depends on: user approval — done when: the P1b acceptance passes.
+  and K2 — depends on: user approval — done when: the P1b acceptance passes, including one fixture
+  built with `include: ['@reduxjs/toolkit']` (RTK 2's `configureStore` calls `createStore` from
+  `redux`; if it captures the store, the user decides whether pilot RTK apps get state, D39), and
+  one real remote built with the spike plugin in the user's workspace (the user runs the build).
 - [ ] **K5 P1 on the built bundles** — owns: `spike/perf-grid/results-built/` — batch: **B4** —
-  depends on: R11, K3, 05 S7 (the harness uploads to `apps/server`) — done when: the K5 acceptance
+  depends on: R11, K3, 05 S7 and S8 (the harness uploads to `apps/server`, and the built loader
+  needs `/sr/config`) — done when: the K5 acceptance
   passes and the numbers are in this plan. The
   leader runs it in the background, as for K3. The day files are kept in `results-built/data/`:
   the S2 recording is the busy session for 01's seek item, and the S3 run gives the hotspot for
@@ -347,6 +411,8 @@ scenarios as K3, with the defaults K3 chose (caps, worker, checkpoints). The har
 | The gate patch doesn't apply to the chosen pin, or released records behave differently because the DOM has moved on. | K1's self-check replays released records with zero warnings. Without the patch `gateActive` is false and caps switch off. D24's vendoring rule applies after two failed upgrades. |
 | The run matrix grows past what the machine can run in a day. | Every variant runs at S2 only; sweeps run only for recorder off and `full` (Run matrix). |
 | The spike's code costs less than the shipped bundles. | K5 re-measures the built bundles (L7). |
+| The synthetic page misses the real app's change mix, so every derived number is wrong (devil blocker, 2026-11-11). | K0 profiles the real app first; K2 matches it within ±20 % (L8). |
+| The AG Grid licence key leaks into the repo. | It's read from `AG_GRID_LICENSE_KEY` only; `.gitignore` is deny-by-default. |
 
 ## Open questions
 
@@ -366,3 +432,4 @@ scenarios as K3, with the defaults K3 chose (caps, worker, checkpoints). The har
 - 2026-11-10 — Q24 answered (user): the P1 workload now feeds a viewport datasource with `setRowData` per conflated AMPS message; no cell flash, so the flash variants are gone; K2 checks what the datasource does while its tab is hidden.
 - 2026-11-10 — Auditor pass (01): K1 runs right after X1 and owns `spike/gate-check/`; K2 adds the startup and seek modes, R0's checks 3 and 5, and `summarize.ts`; K5 records into `apps/server` and keeps its day files for the Gate 2 specs (01 X2).
 - 2026-11-10 — Console load scenario added to P1 and K2 (01 D43, devil B2): `console.debug` at 2,000/s and a `console.warn` of a 10,000-row array; the budget must hold.
+- 2026-11-11 — Overall architect and devil review (01 → Overall review resolution): new K0 real-app profile in B0 (L8, user); go / no-go after the S2 headline runs, which now gate Gate 1 (L9); sizing for 4 windows per user (L10, user); queue-cap, S4-threading and `cpuPct` calibration rules; checkpoints derived from the record rate and snapshot time with a snapshot budget for the user; K2 uses K0's AG Grid version and `ag-grid-enterprise` (key from an env var); K4 adds an RTK fixture and one real remote; K5 depends on S8.

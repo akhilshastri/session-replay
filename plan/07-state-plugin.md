@@ -207,7 +207,7 @@ const attach = (store: Store, name: string, deny: (k: string) => boolean, meta: 
   store.replaceReducer = (r) => replace.call(store, typeof r === 'function' ? wrapReducer(r, name, deny) : r);
   // No state here: the recorder reads it through the handle, at start and after every full snapshot (L13).
   publish({ v: 1, store: name, kind: 'redux', op: 'register', t: Date.now(),
-            meta: { app: meta.app, lib: meta.lib, deny: meta.deny },
+            meta: { app: meta.app, lib: meta.lib, plugin: PLUGIN_VERSION, deny: meta.deny },   // plugin: 03-L18, set at build time
             handle: { getState: () => store.getState() } });
 };
 
@@ -358,7 +358,7 @@ export const srState = createUnplugin(factory);
 - **Sharing proof:** the host stamps `compose.__fixtureMark = 'host'` on load. Each remote then
   reports `compose.__fixtureMark` from its own `import { compose } from 'redux'` (unwrapped). A
   shared singleton shows `'host'` everywhere.
-- **Commands** (root scripts from the B1 root scaffold, 01 X1, which also lists each fixture app and `shared/bridge-probe` as a workspace by explicit path; `store-kit` stays out of the workspaces so it installs as a real package): `bun run fixtures:build` builds all four apps. `fixtures:serve` serves them on
+- **Commands** (root scripts from the B1 root scaffold, 01 X1, which also lists the fixture apps and `shared/bridge-probe` as workspaces through a glob, because Bun fails on an explicit workspace path that doesn't exist yet (01 auditor pass); `store-kit` stays out of the workspaces so it installs as a real package): `bun run fixtures:build` builds all four apps. `fixtures:serve` serves them on
   ports 3410–3413 (`FIXTURE_PORT_BASE` changes them). `fixtures:e2e` runs the Playwright specs,
   tagged `@state-plugin`.
 - **Tooling:** webpack and Vite run through `bunx --bun`, because Node isn't on this machine's
@@ -424,11 +424,11 @@ export const srState = createUnplugin(factory);
 
 ## Tasks
 
-- [ ] **PL0 MF call-site spike** — this is 02's K4 (P1b), owned there (`spike/mf-plugin/`) — batch: B0 — its findings feed PL3–PL6: the `@module-federation/vite` behaviour (L2), webpack under Bun, and the host MF plugin.
+- [ ] **PL0 MF call-site spike** — this is 02's K4 (P1b), owned there (`spike/mf-plugin/`) — batch: B0 — its findings feed PL3–PL6: the `@module-federation/vite` behaviour (L2), webpack under Bun, the host MF plugin, one real remote built with the spike plugin, and whether `include: ['@reduxjs/toolkit']` captures an RTK 2 store (if RTK is itself an MF shared singleton, the store's `app` comes from whichever build provided RTK).
 - [ ] **PL1 Package scaffold** — owns: `packages/state-plugin/{package.json,tsconfig.json,build.ts,test/setup.ts,test/portable.test.ts}` — batch: B1 — depends on: 03 T1 — done when: `exports` for `.` (plugin, ESM + CJS) and `./runtime` (browser ESM) exist; `redux4`/`redux5` dev aliases (`npm:redux@4.2.1`, `npm:redux@5.0.1`) install; the portability guard (L12) runs; `bunx tsc --noEmit`, lint and `bun test` pass. Runs in one coder run with 04 R1 (01 auditor pass).
 - [ ] **PL2 Runtime wrappers** — owns: `packages/state-plugin/src/runtime/**` — batch: B2 — depends on: PL1, 03 T1 — done when: unit tests against both Redux majors (thunk, saga, `replaceReducer`, kill flag, fail-open, deny keys, removed keys, `$root`, the `register` handle and `meta.deny`, `Date.now()` stamps, `srAttach`) and the micro-bench pass; type-check and lint pass.
 - [ ] **PL3 Transform core** — owns: `packages/state-plugin/src/transform/**` — batch: B2 — depends on: PL1 — done when: golden before/after tests, the warning cases, the source-map test and the version-resolution tests (fake `node_modules` trees for Redux 3/4/5/6) pass; type-check and lint pass.
-- [ ] **PL4 Plugin wiring and checks** — owns: `packages/state-plugin/src/{plugin,options}/**`, `src/index.ts` — batch: B2 — depends on: PL3 — done when: unit tests drive the factory with fake Vite and webpack contexts (the probe's value-import names, including the type-only golden cases; the outcome check by names; `expectStores`; the originjs order error; the Vite 8 warning; `optimizeDeps.exclude`); type-check and lint pass.
+- [ ] **PL4 Plugin wiring and checks** — owns: `packages/state-plugin/src/{plugin,options}/**`, `src/index.ts` — batch: B2 — depends on: PL3, 02 K4 (the order check that L2 says to verify in P1b; architect, 2026-11-11) — done when: unit tests drive the factory with fake Vite and webpack contexts (the probe's value-import names, including the type-only golden cases; the outcome check by names; `expectStores`; the originjs order error; the Vite 8 warning; `optimizeDeps.exclude`); type-check and lint pass.
 - [ ] **PL5 Fixtures: host, r18 remote, probe** — owns: `fixtures/apps/{host-webpack-r17,remote-vite-r18,shared/bridge-probe}/**` — batch: B4 — depends on: PL2, PL4 — done when: `bun run fixtures:build` builds both apps, and type-check passes for them. If K4 built webpack 5 and Vite 7 cleanly under Bun, PL5 and PL6 run as one coder run, seeded from K4's configs (copied, not imported). The leader adds `fixtures/apps/shared/bridge-probe` to the root workspaces when PL5 lands (01 X1).
 - [ ] **PL6 Fixtures: r19 remote, plain remote, store-kit** — owns: `fixtures/apps/{remote-vite-r19,remote-plain,shared/store-kit}/**` — batch: B4 — depends on: PL5 — done when: `bun run fixtures:build` builds all four apps and the packed `store-kit` installs under `node_modules`.
 - [ ] **PL7 Fixture e2e specs** (qa, `specs` mode) — owns: `fixtures/apps/e2e/**` — batch: B4 (alongside PL5–PL6) — depends on: the Acceptance list above — done when: the specs compile. They first run at the gate.
@@ -472,3 +472,4 @@ Answered on 2026-11-10 (01, Q39, Q41):
   Node 22 fixture build (A16, Q41); PL2–PL4 move to B2 (01 Batches).
 - 2026-11-10 — Open questions answered (user): built-in MF plugin; no market data in Redux; plain imports; Redux 4 singleton; RTK `configureStore` apps not captured in the MVP; the Node 22 check moves to the B5 dry run on the real-workspace machine.
 - 2026-11-10 — Auditor pass (01): PL1 runs with 04 R1; PL5 and PL6 are one run if K4 was clean; the leader adds the bridge-probe workspace path when PL5 lands.
+- 2026-11-11 — Overall architect and devil review (01 → Overall review resolution): `register` carries `meta.plugin` (03-L18); PL4 depends on K4; K4 also builds one real remote and an RTK `include` fixture; the fixture-workspace text matches X1's glob.

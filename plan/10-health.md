@@ -374,8 +374,9 @@ These override anything above that disagrees.
    `localStorage` at boot, before the config fetch. Turning it off restores the original methods.
 8. **Honest "no AMPS" copy.** Each remote's runtime registers "hook installed, 0 clients", so the UI
    can say "No AMPS connections" only when every remote has the hook; otherwise "orders: AMPS logging
-   not installed in this build (plugin older than 1.1, or `amps: false`)". `sr:meta` gains
-   `recorderVersion` (additive) for the "recorded before AMPS logging" copy.
+   not installed in this build (plugin older than 1.1, or `amps: false`)". `sr:meta` carries
+   `recorderVersion` from v1 (03-L18, 2026-11-11), and `register` carries `meta.plugin`, so the copy can tell
+   "plugin older than 1.1" from `amps: false`.
 9. **Caps and gaps.** Ledger snapshots continue after `amps-capped`. After the cap, or inside a
    `missing-batches` band, the AMPS tab shows a "partial" strip. `amps-capped` is a 15th
    `FidelityReason`: 06's bands table and U5's test grow in v1.1.
@@ -413,7 +414,7 @@ match them (H2 documents exact `requiredVersion`s).
   and the new icons; the Mocks table adds 10–12. U3b's badges, U5's markers and U6a's chips extend
   in v1.1 (H6, H7).
 - **03/05:** `counts.ampsFailures` and `counts.freezes` (`.default(0)`); `hasErrors` keeps its meaning (03-L15).
-- **03:** L11's pre-adoption ring for `kind: 'amps'` (devil fix 3); `sr:meta.recorderVersion`;
+- **03:** L11's pre-adoption ring for `kind: 'amps'` (devil fix 3); (`sr:meta.recorderVersion` already ships in v1, 03-L18);
   `config.amps.enabled` (M10); `lateMs` in `sr:health` samples; `amps-capped` as a 15th reason.
 - **04:** the console formatter applies the 997 cut (devil fix 11).
 - **07:** the new runtime entry and transform. **08:** an integration step: upgrade the plugin, plus
@@ -489,3 +490,4 @@ H1 ∥ H3 ∥ H5 can run together, then H2 ∥ H4 ∥ H6, then H7, then H8 (at m
 - 2026-11-11 — App vitals added (user): slow or frozen, memory growth, DOM size growth; v1.1 in this plan (H1–H4). File renamed from `10-amps.md`.
 - 2026-11-11 — Architect and designer merged (leader). Hook: the build plugin patches `Client.prototype`, on by default (M8, user); AMPS logging and vitals continue in pause bands (M9, H5); `sr:amps` / `sr:health` contracts, recorder, server and UI flow; tasks H0–H8. Design: AMPS and Health tabs in `ts-logs`, the Busy lane, Actions kinds, markers and Sessions badges, thresholds (H6), `--sr-vital`, mocks 10–12. Leader calls: "Next problem (E)"; "Errors only" counts AMPS failures and frozen screens. 04 R6 now ignores non-Redux bridge messages.
 - 2026-11-11 — Devil review merged (leader). Blockers fixed: queue acks and Command-API publishes skip or are limited in the patched `execute`; a construct proxy stamps each instance's remote and opt-out for shared classes; a 200-event pre-adoption ring (03-L11 exception) keeps boot events. Risks: the disconnect noise rule and `hasErrors` unchanged (reverses the leader's "Errors only" call); heap sent only on change and drawn as a 20-minute step line; `lateMs` timer drift; the `amps.enabled` runtime switch (M10); honest "no AMPS" copy and `recorderVersion`; a partial strip after caps or gaps; subscribe-family-only `resent`; secrets masked after every cut and the 997 cut in the console formatter; handle release on close; the `p.then` conditions. Tasks' `owns:` widened; Acceptance gains a tolerance, an on/off equivalence test and more cases.
+- 2026-11-11 — Overall review (01): version stamps (`recorderVersion`, `meta.plugin`) now ship in v1 (03-L18); new enum values here (`amps`, `freeze`, `amps-capped`, the bridge union) rely on 03-L16's tolerant readers; `config.amps.*` gets a recorder-side default per field.

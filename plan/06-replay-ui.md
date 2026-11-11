@@ -307,6 +307,8 @@ pattern and a label ("Visual system" has the patterns).
 | `no-clean-close` | note | No clean close | "Recording ended without a clean close: the last seconds may be missing." (devil X19) |
 | `caps-off` | note | Rate caps off | "Rate caps were configured but not active in this recording, so every change was recorded." |
 | `console-capped` | note | Console cap reached | "This recording hit its console line limit at 10:52:00. Later lines aren't recorded." |
+| any unknown reason (03-L16) | note | the raw reason / "Recorded by a newer recorder: `<reason>`." | — |
+| newer rrweb (03-L18; not a reason) | note at 0:00 | Newer recorder / "Recorded with rrweb 2.3.0; this replayer has 2.2.2. Some changes may not show. Ask for this region's server to be updated." | — |
 
 - **Banner:** `Alert variant="light"`; yellow for pause, quota and overflow, violet for popout, gray
   for hidden-tab; the icon is a 16×16 swatch of the band's pattern. At most 2 banners, then "+1
@@ -586,7 +588,7 @@ apps/replay-ui/
     shell/        Header · SessionBar · ThemeMenu · LayoutMenu · ShortcutsSheet
     ui/           EmptyState · InlineError · SkeletonRows · TimeText
     api/          client · queries · errors
-    lib/          pos · time (incl. parseGoTo) · sr-events
+    lib/          pos · time (incl. parseGoTo); srEvent comes from @sr/protocol/core (03-L17)
     features/
       workspace/  Workspace · panels · default-layout · persist · restore · reset · panel-events · PanelFrame · commands
       player/     store · commands · span · playhead · windows · Panel · TabIcon · Transport · Scrubber · Bands …
@@ -874,7 +876,7 @@ const loadWindow = async (id: string, w: ReplayWindow, signal: AbortSignal, onBy
     const { header, batches } = await readChunks(body);    // splits the frames; inflates with DecompressionStream
     for (const { meta, events } of batches) {
       out.read++;
-      if (meta.integrity === 'ok') { out.chunks.push({ recordingId: meta.recordingId, seq: meta.seq, events }); continue; }
+      if (meta.integrity === 'ok') { out.chunks.push({ meta, events }); continue; }   // 04's one LoadChunk shape
       out.missing.push({ fromSeq: meta.seq, toSeq: meta.seq });            // the engine treats it as a gap
       out.failed.push({ recordingId: meta.recordingId, seq: meta.seq, integrity: meta.integrity });
     }
@@ -1047,8 +1049,8 @@ export const createPlayerController = (o: { qc: QueryClient; detail: SessionDeta
     const my = gen;
     const d = await data(i);
     if (my !== gen) return;                    // a rebuild overtook us
-    const add = d.chunks.filter((c) => !seqs.has(c.seq));   // the edge chunk is in both windows
-    add.forEach((c) => seqs.add(c.seq));
+    const add = d.chunks.filter((c) => !seqs.has(c.meta.seq));   // the edge chunk is in both windows
+    add.forEach((c) => seqs.add(c.meta.seq));
     missing = [...missing, ...d.missing];
     engine!.append(add);
     engine!.setGaps(missing);
@@ -1075,7 +1077,7 @@ export const createPlayerController = (o: { qc: QueryClient; detail: SessionDeta
       engine?.destroy(); layer?.remove();                  // swap: the old frame stayed visible until now
       engine = next; layer = showLayer(nextLayer);
       first = last = current = i;
-      seqs = new Set(d.chunks.map((c) => c.seq)); missing = d.missing;
+      seqs = new Set(d.chunks.map((c) => c.meta.seq)); missing = d.missing;
       patch({ span: { first, last } });
       return true;
     } finally { clearTimeout(slow); if (my === gen) patch({ progress: null }); }
@@ -1203,7 +1205,7 @@ Opening a session, or seeking outside the loaded span, can take a while on the b
 // Sample — not final code. apps/replay-ui/src/features/actions/rows.ts
 import { comparePos, posKey, type ActionRow } from '@sr/protocol';
 import type { LoadChunk } from '@sr/recorder-engine/replay';
-import { srEvent } from '../../lib/sr-events';   // { tag, payload, t } for a type-5 `sr:*` event, else null
+import { srEvent } from '@sr/protocol/core';     // { tag, payload, t } for a type-5 `sr:*` event, else null (03-L17)
 
 export type Row = Omit<ActionRow, 'kind'> & { kind: ActionRow['kind'] | 'state'; local?: true };
 
@@ -1212,7 +1214,7 @@ export const localRows = (chunks: LoadChunk[]): Row[] => chunks.flatMap((c) =>
   c.events.flatMap((e, idx): Row[] => {
     const ev = srEvent(e);
     if (!ev) return [];
-    const pos = { recordingId: c.recordingId, seq: c.seq, idx };
+    const pos = { recordingId: c.meta.recordingId, seq: c.meta.seq, idx };
     if (ev.tag === 'sr:state' && ev.payload.op === 'action')
       return [{ pos, t: ev.t, kind: 'state', name: ev.payload.type ?? '', summary: changedKeys(ev.payload),
                 app: ev.payload.store.split('/')[0], local: true }];
@@ -1232,6 +1234,8 @@ export const mergeRows = (fromApi: Row[], local: Row[], order: ReadonlyMap<strin
 - With `state` or "all requests" selected, the list says which part is loaded. Back/next with
   only those kinds selected moves within the loaded span.
 - State rows take their mini-app from the store name (`<app>/redux#<n>`, 07-L9).
+- **Tolerant (03-L16):** an `ActionKind` this UI doesn't know renders as a generic row (a neutral
+  icon, its `name` and `summary`), and the kind filter shows it under "Other".
 
 ### State at a position
 
@@ -1360,7 +1364,7 @@ The 2026-11-10 contract requests (C1–C14) are all in 03 and 04 now. What the U
 - [ ] Opening a session without a name and a reason is impossible. Cancel returns to the list. A reload within the grant doesn't prompt again. An expired grant pauses, prompts, then resumes at the same position.
 - [ ] `?pos=` shows the frame before the app's reaction (D16). `?t=1:02:13` shows that time. A position outside the session opens at the start with a toast.
 - [ ] Play/pause, back/next (following the action filter, even with the Actions tab closed), all six speeds, scrubber drag and keys, and every shortcut (including `M`, `Shift+E`, `G`) work. Shortcuts do nothing while typing in a field or with a dialog or menu open.
-- [ ] Every `FidelityReason` shows as the band or note 03's table gives it, with a label and a pattern. A banner shows while the play head is inside a gap. Popout bands and the canvas placeholder are visible (D34).
+- [ ] Every `FidelityReason` shows as the band or note 03's table gives it, with a label and a pattern; an unknown reason and an unknown action kind (`batch-future.json`) still render (03-L16); a recording with a newer rrweb shows the "Newer recorder" note. A banner shows while the play head is inside a gap. Popout bands and the canvas placeholder are visible (D34).
 - [ ] Inside a `missing-batches` or `chunk-unreadable` band the "Screen unknown" overlay covers the frame until the next full snapshot, so no frame inside it looks complete (devil X1). "Skip to …" lands on that snapshot. A recording without `sr:close` shows the "ended without a clean close" note.
 - [ ] Playback never plays the time between recordings: at a recording's end it jumps to the next one's first frame with a "Skipped …" toast.
 - [ ] A client clock 5 min off: markers, bands, the action list and the scrubber line up with the screen; labels show `t + clockOffsetMs` (devil X2).
@@ -1398,13 +1402,13 @@ inside each task's `owns:`.
 - [ ] **U2 API layer and mock** — owns: `src/api/**`, `mock/**` — batch: B2 — depends on: 03 T1, T2; U1 — done when: every mock response validates against the 03 schemas; the mock serves the framed `chunks-v1.bin`, and `windowQuery` loads it through `readChunks` (non-`ok` chunks go to `missing`, `next` is followed); every request carries `X-SR-UI: 1` and no empty param; the hooks are tested against the mock, including 403 `{need:'access'}`; `MOCK_SCENARIO=slow|error|empty|expired|live` works. The fixtures may reuse the U0 scenario.
 - [ ] **U3a Shell, theme, workspace** — owns: `src/routes/{root,workspace,workspace-index}.tsx`, `src/shell/**`, `src/theme/**` (takes over U1's stubs), `src/ui/**`, `src/features/workspace/**` — batch: B2 — depends on: U1, U2 — done when: unit tests on a `Model` cover load, fallback with the toast, restore with all three fallbacks, reset and Undo through adoption, the drop rule (Player never into a border), no float or popout, and the event fan-out; every flexlayout name the plan uses is checked against 0.11 (model attributes, the `invalidateTabContentOnParentRender` prop, `Model.fromJson(json, prev)`, the `--flexlayout-*` variables, and `setEventListener`: if it allows several listeners per event, `panel-events.ts` is dropped); the theme choice persists in `sr.theme` and a test checks `theme-boot.js` uses the same key; tab badges render from `counts`; header, session bar, Layout and Theme menus and the shortcuts sheet match the U0 mocks; tier 1 passes.
 - [ ] **U3b Sessions panel** — owns: `src/features/sessions/**` — batch: B2 — depends on: U3a, U4a — done when: filters sync with the URL; all badges render from fixtures; empty, loading and error show under the mock scenarios; ↑/↓ and Enter open a row; search-param parsing is unit-tested.
-- [ ] **U4a Windows, positions and times** — owns: `src/features/player/windows.ts`, `src/lib/{pos,time,sr-events}.ts` — batch: B2 filler (may start once U1 and 03 T2 are done) — depends on: U1; 03 T2 — done when: unit tests cover one window per anchor at the FullSnapshot's own `idx`, no window across recordings, `to: null` at each recording's end, `windowAtTime` snapping between recordings, position order across recordings, `displayMs` with two recordings and different offsets, clock parsing, the local/UTC formatters (L19), and `parseGoTo` (`hh:mm`, `hh:mm:ss`, `+m:ss`, before-start and bad-format errors, L21).
+- [ ] **U4a Windows, positions and times** — owns: `src/features/player/windows.ts`, `src/lib/{pos,time}.ts` (`srEvent` and the position helpers come from `@sr/protocol/core`, 03-L17) — batch: B2 filler (may start once U1 and 03 T2 are done) — depends on: U1; 03 T2 — done when: unit tests cover one window per anchor at the FullSnapshot's own `idx`, no window across recordings, `to: null` at each recording's end, `windowAtTime` snapping between recordings, position order across recordings, `displayMs` with two recordings and different offsets, clock parsing, the local/UTC formatters (L19), and `parseGoTo` (`hh:mm`, `hh:mm:ss`, `+m:ss`, before-start and bad-format errors, L21).
 - [ ] **U4b Controller, stage and binder** — owns: `src/features/player/index.ts` (from U1; then to U5), `src/features/player/{store,commands,span,playhead}.ts`, `src/features/player/engine/**` (controller, layers, toasts), `src/features/player/stage/**` (host, useStageSlot, fit), a first `src/features/player/Panel.tsx` (the slot and a play button), `src/routes/replay.tsx` — batch: B3 — depends on: U4a, U2, U3a; 04 R3's `ReplayEngine` (a `FakeReplayEngine` in the tests until it lands) — done when: controller tests with the fake engine cover append at 60 %, the shared edge chunk appended once, no rebuild at an edge, evict at 3 windows, a rebuild on a seek outside the span, the jump between recordings with its toast, `setGaps` from `missing` plus non-`ok` chunks, `onUnknown` → `unknown`, progress after 300 ms, destroy mid-load, the `gen` guard and `spanRev`; `placeStage` math is tested; the host is never inside `.flexlayout__layout`; the commands facade does nothing with no session; zoom and `fitScale` are tested; `integrity` merges `read` and `failed` across windows; deep links work on the mock, **including a reload with the Player behind another tab or another tabset maximised**; a 0×0 slot hides the host; the host ignores pointer events during a tab drag; flexlayout's tab content is checked for its own stacking context (L22).
 - [ ] **U6a Rows and Actions panel** — owns: `src/features/{rows,actions}/**` — batch: B3 — depends on: U4b — done when: `localRows` from fixture chunks, `mergeRows` with no duplicate failed requests, the single-entry memo (the model is built once for three callers), filters (State off by default), virtualisation, click-to-seek by `pos`, follow and its user-intent rules, and the J/L/E targets are unit-tested; so are console rows in the model (D43): levels, repeat counts, `dropped` counts, and `info`/`log`/`debug` rows from the loaded span.
 - [ ] **U7 State and Diff panels** — owns: `src/features/{state,diff}/**` — batch: B3 (parallel with U6a, U8, U11) — depends on: U4b — done when: `stateAt` tests cover snapshot + actions, removed keys, `$root`, `NotRecorded` values, several stores, a partial store, and "forward from cache equals full recompute"; State and Diff ([Changes | Payload]) render fixture data; State updates at most 4×/s and does no work while hidden.
 - [ ] **U8 Access prompt and expiry** — owns: `src/features/access/**`; takes over `src/routes/replay.tsx` from U4b (the gate) — batch: B3 — depends on: U2, U4b — done when: the prompt blocks loading until granted; the name is remembered and the reason isn't; the lengths follow `AccessReq`; every state in "Access prompt" renders; expiry mid-replay pauses and resumes at the same position (mock `expired`).
 - [ ] **U11 Info panel** — owns: `src/features/info/**` — batch: B3 — depends on: U4a, U2 — done when: details, integrity ("read so far"), the recordings table, known gaps (canvas, popouts, `useState`, WebSocket D41), rate caps (one line per version) and the full legend render from fixtures; empty, loading and error are covered.
-- [ ] **U5 Controls, scrubber, bands, overlays, shortcuts** — owns: `src/features/player/{Panel,TabIcon,Transport,Scrubber,Bands,Legend,LegendPopover,Notes,Overlays,Banner,Zoom,GoTo}.tsx` (takes over U4b's `Panel.tsx` and `index.ts`), `src/features/player/IntegrityNote.tsx`, `src/features/player/bands.css`, `src/features/player/shortcuts.ts` — batch: B3, after U6a — depends on: U4b, U6a (the J/L/E targets) — done when: each of the 14 `FidelityReason` fixtures renders with its colour, pattern and label as the bands table says; banners stack (2 + "more"); the "Screen unknown" overlay (copy by `unknown` reason) and the progress card render from the store in the Player's slot; `IntegrityNote` shows all three states, and a chunk that fails during playback adds an Unreadable band; scrubber labels use `displayMs` and local time; zoom and Go to time work; the Player tab icon follows `status`; the shortcut map is unit-tested, including `M`, `Shift+E`, `G` and the focus rules.
+- [ ] **U5 Controls, scrubber, bands, overlays, shortcuts** — owns: `src/features/player/{Panel,TabIcon,Transport,Scrubber,Bands,Legend,LegendPopover,Notes,Overlays,Banner,Zoom,GoTo}.tsx` (takes over U4b's `Panel.tsx` and `index.ts`), `src/features/player/IntegrityNote.tsx`, `src/features/player/bands.css`, `src/features/player/shortcuts.ts` — batch: B3, after U6a — depends on: U4b, U6a (the J/L/E targets) — done when: each of the 14 `FidelityReason` fixtures renders with its colour, pattern and label as the bands table says, an unknown reason from `batch-future.json` renders as a note with its raw name, and `newerRrweb` shows its note; banners stack (2 + "more"); the "Screen unknown" overlay (copy by `unknown` reason) and the progress card render from the store in the Player's slot; `IntegrityNote` shows all three states, and a chunk that fails during playback adds an Unreadable band; scrubber labels use `displayMs` and local time; zoom and Go to time work; the Player tab icon follows `status`; the shortcut map is unit-tested, including `M`, `Shift+E`, `G` and the focus rules.
 - [ ] **U6b Console and Network panels** — owns: `src/features/{console,network}/**` — batch: B3, after U6a — depends on: U6a — done when: level chips, the stack expand after a seek, dropped and `console-capped` rows, the Network table (time, method, status, URL, duration; status 0 shows "Failed"), the "loaded part" strips and the tab-badge counts are tested on fixtures.
 - [ ] **U9 Hotspots page** — owns: `src/routes/hotspots.tsx`, `src/features/hotspots/**` — batch: B4 — depends on: U2; 05 S8 hotspots API (or the mock) — done when: filters, sorting, the Partial day badge and the example link work on fixtures; empty, loading and error are covered; it matches `07-hotspots.html`.
 - [ ] **U10 Real server and CSP** — owns: `src/api/client.ts` (from U2), `test/csp.test.ts` — batch: B4 — depends on: 05 S7 (query API); 04 R3 (the inert URL rewrite, devil X27); U1–U9, U11 — done when: the UI type-checks against `QueryApi`; `csp.ts` matches `apps/server`'s header; the golden session replays from `apps/server` with the D30 CSP and no violations. (qa writes the e2e specs in `specs` mode during B3–B4; they first run at the gate.)
@@ -1429,7 +1433,7 @@ placeholders and theme stubs → U3a and the panel tasks; U4b's `Panel.tsx` → 
 | The mock drifts from the real server. | The mock is validated by the same zod schemas and serves 03's `chunks-v1.bin`; U10 switches to the real type. |
 | UTC days confuse APAC staff. | Labels; times in the recorded user's local time with UTC on hover (D42). |
 | Old engines or iframes leak when switching sessions. | `destroy` plus the `gen` guard; a heap check in acceptance. |
-| The Player remounts, or its iframe reloads, when its tab moves or maximises (flexlayout moves tab elements with `appendChild`). | L22's fixed stage host; Reset and Undo adopt the old model; an e2e test moves and maximises the tab and checks the same frame with no rebuild. |
+| The Player remounts, or its iframe reloads, when its tab moves or maximises (flexlayout moves tab elements with `appendChild`). | L22's fixed stage host; Reset and Undo adopt the old model; an e2e test moves and maximises the tab and checks the same frame with no rebuild. **04 R0 check 9 proves the host in B0** (architect, 2026-11-11), so a miss changes this plan before U4b, not in the middle of B3. |
 | The stage is measured while hidden behind another tab. | The host only becomes `visibility:hidden` and keeps its last size; never `display:none`. Rescale on the tab's visibility event. |
 | The host covers flexlayout's chrome (splitters, drag outlines, the Sessions border overlay). | The z-index stacking in "Router and flexlayout", checked during a drag and with the border overlay open. |
 | React Compiler serves stale values from mutable objects (a flexlayout `Node` or `Model`). | Never read node state while rendering; events into state (`PanelFrame`); `'use no memo'` as the escape hatch. |
@@ -1490,3 +1494,4 @@ Redesign round, answered on 2026-11-11:
 - 2026-11-10 — Console and analytics review merged (leader): the ⚠ badge shows `errors + consoleErrors`; stacks expand after a seek loads the span; the `console-capped` note; U6 covers `dropped`.
 - 2026-11-11 — Replay UI redesign (user asked; dx-ux-designer and architect, merged by the leader): one flexlayout-react 0.11 workspace with eight tabs, Player and Sessions locked, saved per browser with Reset and Undo, no popouts (L16); a fixed session bar for the identity and integrity notes; light and dark themes via an external `theme-boot.js` (L17); Mantine 9 chosen over shadcn/ui, with a 24 px density file and AA overrides (L18); wall-clock times (L19); zoom and Go to time (L20, L21); a fixed stage host outside flexlayout so moving the Player never reloads its iframe (L22); panel modules at fixed paths (L23); one row model for Actions, Console and Network (L24); no `packages/ui` (L25). L1 moves from Bun's bundler to Vite 8 with React Compiler. Design: new workspace, shell, screens, the full 14-reason bands table, visual system, mocks and workspace sections replace the three-column wireframes. Tasks: new U0 (mocks) and U11 (Info); U3 and U6 split into a/b; U1, U4b, U5 and U7 changed. New acceptance items and risks.
 - 2026-11-11 — Devil review of the redesign merged (leader): blocker 1, the stage host is attached by the binder before `open()` and the Player tab never renders on demand; blocker 2, chunks that fail their check are tracked apart from missing batches (`WindowData.failed`, the store's `integrity`, `IntegrityNote`, a live Unreadable band, the `unknown` reason). Risks: pointer events off during tab drags, a 0×0 slot hides the stage, overlays in the slot with the host `inert`, a compiler preload for `bun test`, the row model keyed by `spanRev`, `player/index.ts` passed U1 → U4b → U5, one filter store per panel, B3 slots shared across lanes, WCAG 2.2 AA with 24 px rows and targets, Mantine `sm` override, `--sr-loaded` blue-6 and a body gap around bands. Nits: U3a checks every flexlayout name; the compiler check looks for `react.memo_cache_sentinel`. Grid data: v1 shows it on the recorded screen only; a future Grids tab waits for the I6 spike (user, Q43).
+- 2026-11-11 — Overall architect and devil review (01 → Overall review resolution): one `LoadChunk` shape `{ meta, events }` (the window builder, `localRows` and the controller read `c.meta`); `srEvent` and the position helpers come from `@sr/protocol/core`; unknown reasons and action kinds render (03-L16); a "Newer recorder" note (03-L18); 04 R0 check 9 proves L22's stage host in B0. Both themes stay in v1 (user).

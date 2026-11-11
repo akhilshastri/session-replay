@@ -18,17 +18,17 @@ Inherited: D12, D13, D18, D20, D21, D22, D26, D27, D28, D29, D30, D31, D32, D33,
 
 | # | Decision | Why |
 |---|---|---|
-| L1 | **One `writer` Bun Worker; reads on the main thread; short-lived job Workers** (D31; architect A12).<br>• `writer` does every SQLite write in short group commits.<br>• MVP2 (09-L11): one short-lived runner per analytics query, stopped at 10 s; never on the main thread.<br>• Reads run on the main thread through read-only WAL connections, with indexed, `LIMIT`ed queries only.<br>• Day close, retention, rebuild, backup and erasure rewrites each run in a **short-lived Worker** per run: it starts, does the job, returns its result and exits. Checks (`quick_check`, hashing) use read-only handles, so they never block the writer (devil X17).<br>• A job Worker writes only files nobody else has open (`master.db.rebuild`, `holds/*.db`, sidecars, backup copies, erasure temp files). Anything else it needs written, it returns, and the main thread hands it to `writer`.<br>• **Fallback:** if S13 shows event-loop lag over 20 ms at p99, a resident `jobs` worker takes the reads (A12). | bun:sqlite is synchronous, so a write or a long scan on the main thread stalls every request. Reads don't need a worker: chunks are stored gzip bytes served as they are (03-L8), so a read is an index lookup plus a byte copy, with no inflate and no parse. A resident second worker would add a hop to every read and sit idle most of the day. |
+| L1 | **One `writer` Bun Worker; reads on the main thread; short-lived job processes** (D31; architect A12; child processes since 2026-11-11).<br>• `writer` does every SQLite write in short group commits.<br>• MVP2 (09-L11): one short-lived child process per analytics query, killed at 10 s; never on the main thread.<br>• Reads run on the main thread through read-only WAL connections, with indexed, `LIMIT`ed queries only.<br>• Day close, retention, rebuild, backup and erasure rewrites each run as a **short-lived child process** per run (`Bun.spawn(['bun', 'apps/server/src/jobs/<job>.ts', …])`, the result as one JSON line on stdout): it starts, does the job, returns its result and exits. Bun's docs still call `Worker` experimental, "particularly for terminating workers"; a child process can be killed reliably, and a crash in a job can't take ingest down (architect, 2026-11-11). `writer` stays the one resident Worker and is never terminated. Checks (`quick_check`, hashing) use read-only handles, so they never block the writer (devil X17).<br>• A job process writes only files nobody else has open (`master.db.rebuild`, `holds/*.db`, sidecars, backup copies, erasure temp files). Anything else it needs written, it returns, and the main thread hands it to `writer`.<br>• **Fallback:** if S13 shows event-loop lag over 20 ms at p99, a resident `jobs` worker takes the reads (A12). | bun:sqlite is synchronous, so a write or a long scan on the main thread stalls every request. Reads don't need a worker: chunks are stored gzip bytes served as they are (03-L8), so a read is an index lookup plus a byte copy, with no inflate and no parse. A resident second worker would add a hop to every read and sit idle most of the day. |
 | L2 | **Three kinds of state file instead of one `master.db`** (D21).<br>• `master.db` is a pure cache and can be rebuilt.<br>• `control.db` holds the wrapped user keys (only when D27 is on) and subjects. It is never rebuilt and is copied off the PVC daily.<br>• `audit/access-<yyyy>.db` is append-only, and copied off the PVC the same way.<br>• **Legal holds live in the ConfigMap** (L8), not in a database (architect A14). | A rebuild of a cache that also held the access log and the keys would wipe the audit trail and make every encrypted chunk unreadable. Holds in the ConfigMap need no admin endpoint and get Git review. |
 | L3 | **Ack after the day-file commit.** `master.db` is updated afterwards, in its own transaction. If that update fails, the session is marked for repair. | SQLite transactions over several WAL databases aren't atomic as a set. The day file is the truth, so a catalog error must never un-ack or lose data. |
 | L4 | **Identity = SHA-256 of the decoded body bytes** (03-L8, architect A4).<br>• A gzip body is stored **as it arrived**. The plain `pagehide` tail is gzipped once, on the way in.<br>• A second hash, over the bytes actually stored, is the **read integrity check** (D28).<br>• A chunk read never inflates, parses or re-stringifies: the stored bytes go out in 03's framed response, and the browser inflates them. | A gzip retry and a plain tail of the same batch decode to the same bytes, so they get the same identity. Hashing the stored bytes lets a read check integrity without inflating anything. |
 | L5 | **De-dup with an LRU map of 8-byte hash prefixes per recording, preloaded before `decide()`** (devil X18).<br>• Key: `recordingId`. Value: `seq →` the 8-byte identity prefixes seen for that seq.<br>• Before each group's `decide()`, `writer` loads any recording it doesn't have yet, from the session's files plus today's and yesterday's files (new rows only go to those two).<br>• `decide()` then does no I/O.<br>• Default cap `SR_DEDUP_MAX_SEQS = 500 000` entries (about 40 MB); the pilot region writes about 290 k batches a day at the 5 s cadence. | A retry can arrive days later (queue cap 72 h) and land in another file, so a per-file unique key alone would store it twice. A global catalog of every `seq` would grow by millions of rows. 8 bytes is enough: two different batches for the same seq share a prefix about once in 10¹⁹. |
-| L6 | **Batch day = UTC day of `t0 + (receivedAt − sentAt)`.** A day is sealed at 00:00 UTC plus a 30 min grace. **A batch for a sealed day goes to the current day's file**, linked through `session_files` (D31, architect A13). There are no late files. | The grace absorbs normal in-flight traffic. After that, only real backlog arrives, and it is small. A late chunk is deleted with the file that holds it, so it may outlive the 30-day retention by its backlog age: at most 72 h, the recorder's queue cap. No late files means no late-file routing, sealing or rebuild cases. |
+| L6 | **Batch day = UTC day of `t0 + (receivedAt − sentAt)`.** A day is sealed at 00:00 UTC plus a grace that each region's overlay sets (`SR_DAY_CLOSE_GRACE_MIN`: 30 min in NAM and EMEA; about 15 h in APAC, so its seal runs near 23:00 Singapore time, outside trading hours; user, 2026-11-11). Days stay UTC. Backup and retention run right after each seal. **A batch for a sealed day goes to the current day's file**, linked through `session_files` (D31, architect A13). There are no late files. | The grace absorbs normal in-flight traffic. After that, only real backlog arrives, and it is small. A late chunk is deleted with the file that holds it, so it may outlive the 30-day retention by its backlog age: at most 72 h, the recorder's queue cap. No late files means no late-file routing, sealing or rebuild cases. |
 | L7 | **No `segments` table.** The day file has a small `marks` table (seek anchors, `sr:meta`, `sr:rate-caps`, `sr:asset`, `sr:close`). `master.db` has `session_files`, `session_days` and `snapshots`. | `IngestBatch` has no segment field. Readers need the file map and the seek anchors. A rebuild reads `marks` and `actions`, so it never inflates a chunk. |
 | L8 | **Config is a ConfigMap-mounted JSON file** with the kill switch, allow-list, rate caps and **legal holds** (D22). The server checks it every 15 s; with the kubelet's sync, a change reaches running tabs in **about 2 min**.<br>**Emergency kill:** an override file `ops/override.json` in the data dir, written with `oc exec` (L9) and checked every 5 s, stops recording in **about 20 s**. It can only switch recording **off**. | The MVP has no login (D38), so an admin endpoint would let anyone on the internal network switch recording off or lower rate caps. ConfigMap edits go through Git review and cluster RBAC. The override skips Git review, so it may only do the safe thing. It lives on the PVC, so it survives a restart. |
 | L9 | **No admin listener. Admin work is a CLI run with `oc exec … bun apps/server/src/cli.ts <cmd>`.** The CLI never opens a database: it writes a **request file** into `ops/requests/`, and the running server picks it up, runs it through the normal write path, and writes a result file the CLI prints. | **Why request files, not "stop the server":** the server is the only writer of its files, so the CLI must go through it. Stopping it would stop ingest for the whole region (one replica), and a stopped pod can't be reached with `oc exec`: you'd need to scale to 0 and attach the RWO volume to a debug pod. With request files, ingest keeps running, every rule (holds, append-only log, one writer) still applies, and cluster RBAC (`pods/exec`) stays the gate. |
 | L10 | **Viewer grant:** a signed cookie `sr_viewer={vid,name}` plus an in-memory grant per `vid` (one browser), created by `POST /api/access`. One grant covers **every session** opened in that browser for 8 h or until the server restarts (user, Q30); each open and chunk fetch is still logged under that grant's name and reason. | Meets D38 (a self-entered name and reason, every access logged) without a login. A restart only costs a re-prompt. |
-| L11 | **Limits and the quota are derived from P1's measured bytes per minute** (02; architect A1). The starting defaults below are **provisional** until P1 reports:<br>• body 4 MiB, sized from P1's full-snapshot sizes (devil X10); gunzip output 16 MiB;<br>• per userId + IP: 20 req/s with a burst of 100, and 8 MiB/min (about 3× P1's busiest scenario, once measured);<br>• **daily quota: a fuse at about 3× a busy user's day** (P1's S2 gzip bytes/min × 60 × 8 h × 3), keyed on **userId + IP** (devil X16). Until P1 reports: 500 MB/day;<br>• global `503` + `Retry-After` when the writer queue is over 64 MiB or free disk is under `SR_MIN_FREE_BYTES`. | Limits that sit below real traffic cut audit data. The first sizing assumption and the architect's estimate differ 15–70×, so the numbers must come from P1. Keying on userId + IP means a flood under one userId from another IP can't use up the real user's quota. |
+| L11 | **Limits and the quota are derived from P1's measured bytes per minute** (02; architect A1). The starting defaults below are **provisional** until P1 reports:<br>• body 4 MiB, sized from P1's full-snapshot sizes (devil X10); gunzip output 16 MiB;<br>• per userId + IP: 20 req/s with a burst of 100, and 32 MiB/min (4 windows of about 3× P1's busiest scenario, once measured; 02-L10);<br>• **daily quota: a fuse at about 3× a busy user's day** (P1's S2 gzip bytes/min × 60 × 8 h × 4 windows × 3; user, 2026-11-11: traders keep 2–4 windows open), keyed on **userId + IP** (devil X16). Until P1 reports: 2 GB/day;<br>• global `503` + `Retry-After` when the writer queue is over 64 MiB or free disk is under `SR_MIN_FREE_BYTES`. | Limits that sit below real traffic cut audit data. The first sizing assumption and the architect's estimate differ 15–70×, so the numbers must come from P1. Keying on userId + IP means a flood under one userId from another IP can't use up the real user's quota. |
 | L12 | **Pinned versions:**<br>• `hono` 4.13.x with `@hono/bun` 1.0.x, not hono 5 (still an rc);<br>• `zod` 4.6.x, `@hono/zod-validator` 0.9.x;<br>• `pino` for logs, `prom-client` for metrics.<br>Each is pinned to the newest release that is at least 2 weeks old. | `hono/bun` is deprecated in 4.13 in favour of `@hono/bun`, so the later move to v5 stays small. |
 | L13 | **The UI CSP is D30's, word for word**, on `/` and every SPA route. It lives in one constant, and a test compares it with D30. | The about:blank replay iframe inherits it. A drift between plan and server would quietly re-open live requests. |
 | L14 | **`/assets/:sha256` is served with** `Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; sandbox` and `nosniff`. | Without it, a cached SVG opened directly on our origin could run script. |
@@ -51,7 +51,7 @@ flowchart LR
       OPS["ops loop, every 5 s<br/>ops/override.json · ops/requests/*"]
     end
     WR["writer worker<br/>preload · decide · group commit<br/>every SQLite write"]
-    JOB["short-lived job Workers<br/>seal · retention · rebuild · backup · erase"]
+    JOB["short-lived job processes<br/>seal · retention · rebuild · backup · erase"]
     MET[":9464 metrics"]
   end
   GW["host gateway (same-origin /sr/*)"] --> ING --> WR
@@ -83,12 +83,12 @@ flowchart LR
 **Startup order:**
 1. Parse the env with zod.
 2. Run the filesystem check (below).
-3. If `master.db` is missing or its `user_version` is old, run a **full rebuild** in a job Worker (into `master.db.rebuild`, then an atomic rename) before anything opens `master.db`.
+3. If `master.db` is missing or its `user_version` is old, run a **full rebuild** in a job process (into `master.db.rebuild`, then an atomic rename) before anything opens `master.db`.
 4. Start `writer`. It opens the files, then **repairs** sessions marked for repair and those in today's and yesterday's files (idempotent rollups, a few seconds).
 5. The main thread opens its read-only handles, loads the config and any override file, starts the ops loop and both listeners, and turns `/healthz/ready` green.
 6. Seal any overdue days.
 
-**Shutdown:** on SIGTERM, stop both listeners, let `writer` flush its queue (commit and reply), terminate any running job Worker (every job resumes cleanly), then exit.
+**Shutdown:** on SIGTERM, stop both listeners, let `writer` flush its queue (commit and reply), kill any running job process (every job resumes cleanly), then exit.
 
 ### Routes
 
@@ -157,7 +157,7 @@ export const requireUiHeader = createMiddleware(async (c, next) => {
    - `blobSha = SHA-256(blob)` over the bytes that will be stored: the integrity hash;
    - `writeKeySha = SHA-256(X-SR-Write-Key)`;
    - `t0`/`t1` (raw client ms), `offsetMs = receivedAt − sentAt`, and the batch day (L6). A day older than retention → 400 `{reason:'expired'}`;
-   - **action rows, sparse kinds only** (03 `ActionKind`; architect A11): `sr:click`, `sr:input`, `sr:nav`, `sr:error`, `sr:net` **only when failed** (status 0 or ≥ 400), `sr:fidelity`, `sr:report`, `sr:hotspot`, and `sr:console` **only for `error` and `warn`** (D43; `info`, `log` and `debug` stay in the chunks, 03-L15). Console rows store `name` = the level, `summary` = the message cut to 200 characters, and `count`. `console.error` lines not marked `same` add to `counts.consoleErrors`; `counts.errors` stays `sr:error` only (03-L15). The decode walks each batch's events **once**, with one switch per tag, so 09's `extract()` can plug in at MVP2 (D44);
+   - **action rows, sparse kinds only** (03 `ActionKind`; architect A11): `sr:click`, `sr:input`, `sr:nav`, `sr:error`, `sr:net` **only when failed** (status 0 or ≥ 400), `sr:fidelity`, `sr:report`, `sr:hotspot`, and `sr:console` **only for `error` and `warn`** (D43; `info`, `log` and `debug` stay in the chunks, 03-L15). Console rows store `name` = the level, `summary` = the message cut to 200 characters, and `count`. **Fidelity rows** store `name` = the reason and `summary` = `start` or `end`, a space, then the detail (architect, 2026-11-11), so the Query API can pair them into bands. Readers are tolerant (03-L16): an unknown reason is stored like any other and served as a note; an unknown tag stays only in the blob. `sr:cost` feeds the `sr_recorder_cost_ratio` metric and stays in the blob. `console.error` lines not marked `same` add to `counts.consoleErrors`; `counts.errors` stays `sr:error` only (03-L15). The decode walks each batch's events **once**, with one switch per tag, so 09's `extract()` can plug in at MVP2 (D44);
    - **marks** (L7): every rrweb FullSnapshot (`type 2`) as a seek anchor with its `idx`, plus `sr:meta`, `sr:rate-caps`, `sr:asset` and `sr:close`. These are **not** action rows (devil X25). `sr:state`, `sr:redacted` and everything else stay only inside the blob.
 7. Hand the chunk to `writer` (the blob's buffer is transferred, not copied) and wait for the commit. Map the result to 204 / 208 / 403 / 503.
 8. Every 2xx carries `X-SR-Config-Version`.
@@ -305,7 +305,7 @@ Each database is opened with `new Database(path, { create: true, strict: true })
 ### Storage (D26, D27)
 
 ```sql
--- Sample — not final code. <yyyymmdd>/<class>.db: the source of truth. user_version = 1.
+-- Sample — not final code. <yyyymmdd>/<class>.db: the source of truth. user_version = 1 (rule below the schema).
 CREATE TABLE chunks (
   id INTEGER PRIMARY KEY,                        -- rowid table: blobs are large, so not WITHOUT ROWID
   recording_id TEXT NOT NULL, seq INTEGER NOT NULL,
@@ -384,12 +384,13 @@ CREATE TRIGGER access_log_no_delete BEFORE DELETE ON access_log BEGIN SELECT RAI
 - The access log names recorded users only by `subject_hmac = HMAC-SHA256(SR_SUBJECT_KEY, userId)`.
 - `quota_bytes` is a fuse, not a record: a rebuild resets today's counters, which is acceptable.
 
-**Rebuild:** `master.db` is rebuilt from the files, in a job Worker.
+**Day-file versions** (devil, 2026-11-11). Sealed files are read-only and hold files live until a hold lifts, so files of several versions sit side by side. Day-file schema changes are **additive only** (new tables, new nullable columns); every reader (the rollups, `grep-day`, chunk and action reads) checks `user_version` per file and supports every version still within retention or on hold; sealed files are never migrated in place.
+
+**Rebuild:** `master.db` is rebuilt from the files, in a job process.
 
 ```ts
-// Sample — not final code. src/jobs/rebuild.ts — a short-lived Worker (L1). It writes only master.db.rebuild.
-declare var self: Worker;
-self.onmessage = ({ data: { dataDir } }: MessageEvent<{ dataDir: string }>) => {
+// Sample — not final code. src/jobs/rebuild.ts — a short-lived child process (L1). It writes only master.db.rebuild.
+const run = (dataDir: string) => {
   const tmp = join(dataDir, 'master.db.rebuild');
   rmSync(tmp, { force: true });
   const m = openMaster(tmp);                                   // fresh schema, user_version = current
@@ -403,8 +404,9 @@ self.onmessage = ({ data: { dataDir } }: MessageEvent<{ dataDir: string }>) => {
     f.close();
   }
   m.db.close();
-  postMessage({ ok: true, value: { file: tmp } });             // the caller swaps it in with a rename (atomic)
+  return { ok: true, value: { file: tmp } };                   // the caller swaps it in with a rename (atomic)
 };
+console.log(JSON.stringify(run(Bun.argv[2]!)));               // one JSON line on stdout for run-job.ts
 ```
 
 - `pages()` reads in short transactions, so the WAL of today's file can still checkpoint while a rebuild runs.
@@ -484,6 +486,7 @@ Sample — not final code (the config file for one region):
 **Emergency override (about 20 s).** `ops/override.json` in the data dir. The ops loop checks it every 5 s.
 - It can only kill: `{ "killSwitch": true, "apps": ["blotter"], "by": "…", "ticket": "…", "at": "…" }`. No `apps` = every app.
 - On pickup, the server writes an `override` access row and serves the killed config at once. Tabs stop on their next upload response.
+- `/sr/config` always serves `RecorderConfig.parse(merged)`, so every default is filled in (03-L16).
 - **Fail closed:** a file that doesn't parse counts as a kill of every app, and an alert fires. Stopping recording is always the safe direction (D8).
 - It survives a restart (it's on the PVC). It stays until someone removes it; an active override raises an info alert, so it isn't forgotten.
 - The CLI writes and removes it (`kill on` / `kill off`, below), with a temp file and a rename, so the server never reads half a file.
@@ -494,10 +497,10 @@ Sample — not final code (the config file for one region):
 |---|---|---|
 | `status` | Prints the config version, override state, last seal, retention and backup, queue depth, open requests. Needs no `--by`. | main thread (read-only) |
 | `kill on [--app <name>]` / `kill off` | The CLI writes or removes `ops/override.json` itself: a plain file, not a database. | — |
-| `seal --day <yyyymmdd>` | Seals an overdue day. | `writer` + seal Worker |
-| `retention --dry-run` / `retention --run` | Lists, or runs, today's retention. | retention Worker + `writer` |
-| `rebuild` | Rebuilds `master.db` and swaps it in. | rebuild Worker + `writer` |
-| `erase --user <id> [--day <yyyymmdd>] [--dry-run]` | One step of the erasure runbook (below). | `writer`, or an erase Worker for a day-file rewrite |
+| `seal --day <yyyymmdd>` | Seals an overdue day. | `writer` + seal job |
+| `retention --dry-run` / `retention --run` | Lists, or runs, today's retention. | retention job + `writer` |
+| `rebuild` | Rebuilds `master.db` and swaps it in. | rebuild job + `writer` |
+| `erase --user <id> [--day <yyyymmdd>] [--dry-run]` | One step of the erasure runbook (below). | `writer`, or an erase job for a day-file rewrite |
 
 ```ts
 // Sample — not final code. src/cli.ts — never opens a database; drops a request for the running server (L9).
@@ -540,7 +543,8 @@ All reads run on the main thread (L1): `master.db` for lists, summaries and the 
 
 - `chunk-unreadable` covers a shredded key (known from `control.db`) and the hash mismatches in `bad_chunks` (found by an earlier read or by the seal). A mismatch found for the first time during playback comes back in the chunks header, and the UI treats it the same way.
 - `no-clean-close` applies to a recording with no `sr:close` mark and no batch in the last 2 min (devil X19). It's worked out at read time, so a late `sr:close` removes it.
-- The recorder's own fidelity events (action rows of kind `fidelity`) become bands (a start and an end) or notes (a start alone), per 03's table.
+- The recorder's own fidelity events (action rows of kind `fidelity`) become bands (a start and an end) or notes (a start alone), per 03's table and `bandKind` (an unknown reason is a note).
+- Console action rows map `name` to `level` in `ActionRow` (03).
 
 **Actions:** `?kinds=&after=&to=&failedOnly=1&limit=1000` (03). Recording by recording, in start order; within a recording by the primary key `(recording_id, seq, idx)`. `after` and `to` are exclusive. `next` is the position of the last row returned.
 
@@ -587,34 +591,35 @@ A chunk read costs one SHA-256 over at most 8 MiB per response (a few ms with `B
 
 ### Day close, retention, backups, filesystem check
 
-**Seal (00:00 UTC + `SR_DAY_CLOSE_GRACE_MIN`, default 30).** Each step checks its own state, so a crash mid-way resumes cleanly, and startup seals any overdue day.
+**Seal (00:00 UTC + `SR_DAY_CLOSE_GRACE_MIN`, default 30, set per overlay, L6).** While the grace runs, the day's file and today's file are both open; `writer` handles both. Each step checks its own state, so a crash mid-way resumes cleanly, and startup seals any overdue day.
 1. Batches for the day now route to today's file (L6: the rule is time-based, so nothing needs storing).
 2. The main thread closes its read handles for the day. A read that needs the file during the next step waits a few milliseconds.
 3. `writer` runs `wal_checkpoint(TRUNCATE)` and `journal_mode=DELETE`, then closes the file. This is quick: SQLite checkpoints the WAL all day, so little is left.
-4. A **seal Worker** opens the file read-only: `PRAGMA quick_check`, a check of every chunk's `blob_sha`, the file's SHA-256 into the `.sha256` sidecar, then `chmod 0444`. This takes minutes on a 1.2 GB file and never blocks the writer (devil X17).
+4. A **seal job** opens the file read-only: `PRAGMA quick_check`, a check of every chunk's `blob_sha`, the file's SHA-256 into the `.sha256` sidecar, then `chmod 0444`. This takes minutes on a 1.2 GB file and never blocks the writer (devil X17).
 5. `writer` writes the `day_files` row and any `bad_chunks` rows, and a `seal` access row.
 
-**Backups (devil X21), daily after the seal.**
-- A **backup Worker** writes `VACUUM INTO` copies of `control.db` and the current audit file (and last year's in January) to `ops/backup/<yyyymmdd>/`, runs `quick_check` on each copy, then sends them **off the PVC** to `SR_BACKUP_TARGET`: object storage through Bun's built-in S3 client, or a second volume on a different storage backend (Q37). `VACUUM INTO` is a read transaction, so the writer keeps going.
+**Backups (devil X21), right after each seal.**
+- A **backup job** writes `VACUUM INTO` copies of `control.db`, the current audit file (and last year's in January) **and every `holds/*.db` that changed** (devil, 2026-11-11: legal-hold evidence must survive a lost volume) to `ops/backup/<yyyymmdd>/`, runs `quick_check` on each copy, then sends them **off the PVC** to `SR_BACKUP_TARGET`: object storage through Bun's built-in S3 client, or a second volume on a different storage backend (Q37). `VACUUM INTO` is a read transaction, so the writer keeps going.
 - 30 daily copies are kept, so erased keys age out (D27). A `backup` access row records each run.
-- `master.db` isn't copied off the PVC: it can be rebuilt. Closed day files are copied to object storage if the cluster has one (01 Ops); hourly VolumeSnapshots cover today's file.
+- `master.db` isn't copied off the PVC: it can be rebuilt. Closed day files are copied to the off-PVC target too; hourly VolumeSnapshots cover today's file. **A confirmed off-PVC target (Q37) is a pilot precondition** (08 §6 P6).
+- **Encrypted at rest** (user, 2026-11-11, with D27 off for the pilot): the block storage class and the backup bucket or volume must be encrypted at rest. S15 checks it per cluster.
 - **Key escrow:** `SR_MASTER_KEY` (D27) and `SR_SUBJECT_KEY` are escrowed **outside the cluster**: a Vault path with its own backup, or a sealed offline copy held by two named people. Without the master key, a restored `control.db` can't unwrap any user key, and every encrypted chunk is lost.
 - **Restore drill** (S15, before the pilot): restore `control.db`, the audit file and one closed day file into an empty namespace with the escrowed keys. The server must start, rebuild `master.db` and replay one session, including an encrypted one when D27 is on.
 
-**Retention (daily at 01:00 UTC, after the seal).** For each class, take the day folders older than its retention period:
+**Retention (right after each seal's backup).** For each class, take the day folders older than its retention period:
 1. Re-read the config file and take its `legalHolds`.
-2. A **retention Worker** copies each held session's rows (chunks, actions, marks) into `holds/<id>.db` and verifies the copy (row counts and byte-equal blobs). Hold files are written only by this Worker.
+2. A **retention job** copies each held session's rows (chunks, actions, marks) into `holds/<id>.db` and verifies the copy (row counts and byte-equal blobs). Hold files are written only by this job.
 3. `writer` repoints `session_files` from the day file to the hold file.
 4. The main thread drops its read handles for the folder; the folder is deleted.
 5. `writer` drops the catalog rows that no longer have a file, deletes hold copies whose hold left the ConfigMap, garbage-collects assets, and writes a `retention` row (days deleted, holds copied, holds dropped).
 
-`--dry-run` only lists and logs. A late chunk is deleted with the file that holds it, at most 72 h after its own day would have been (L6). The audit files are deleted by whole year once they are past 2 years.
+`--dry-run` only lists and logs. **Emergency:** `retention --run --keep-days N` (N ≥ 7) deletes day folders older than N days, holds still honoured, when the disk nears full (devil, 2026-11-11); it writes a `retention` row with `emergency: true`. A late chunk is deleted with the file that holds it, at most 72 h after its own day would have been (L6). The audit files are deleted by whole year once they are past 2 years.
 
 **Erasure runbook** (a written manual procedure, D22; no erase API, UI or automation beyond this). It ships as `deploy/openshift/runbooks/erasure.md`; 08 §6 points here.
 1. Open a ticket and confirm the user id. If any of the user's sessions is under a legal hold, stop: the hold wins until it is lifted in the ConfigMap.
 2. Dry run: `oc exec sr-server-0 -- bun apps/server/src/cli.ts erase --user <id> --by <name> --ticket <ref> --dry-run`. It lists the user's sessions, the day files that hold them, and which rows are encrypted (`enc`).
 3. **Rows written with D27 on:** run the same command without `--dry-run`. The server deletes the `user_keys` and `subjects` rows (through `writer`), evicts the key from the main thread, and drops the catalog rows. From then on those chunks read as `unreadable`. Their ids, `kind` and `name` stay readable until their files age out (D27).
-4. **Rows written with D27 off:** for each sealed day file the dry run lists, run `erase --user <id> --day <yyyymmdd>`. An erase Worker copies the file, deletes the user's rows in the copy, `VACUUM INTO`s a fresh file (so no free pages keep the old data), and hashes it. Then the main thread drops its handles, `writer` renames the new file over the old one, writes the new sidecar and `day_files` row, and updates the catalog. Today's file waits for its seal.
+4. **Rows written with D27 off:** for each sealed day file the dry run lists, run `erase --user <id> --day <yyyymmdd>`. An erase job copies the file, deletes the user's rows in the copy, `VACUUM INTO`s a fresh file (so no free pages keep the old data), and hashes it. Then the main thread drops its handles, `writer` renames the new file over the old one, writes the new sidecar and `day_files` row, and updates the catalog. Today's file waits for its seal.
 5. Check: a second dry run lists nothing. The user's sessions are gone (D27 off) or unreadable (on); a colleague's session from the same day still replays.
 6. Record: each step writes an `erase` row with the date when the last backup or VolumeSnapshot that still holds the data expires (at most 30 days). Put that date in the ticket. Assets aren't touched: they're shared, allow-listed static files (D33). The staff notice already says a person can still appear in other users' recordings.
 
@@ -760,8 +765,11 @@ spec:
 
 **Snapshots** are crash-consistent. That is safe here: with `synchronous=FULL`, every acked commit is already on disk.
 
-**Image:** `apps/server/Dockerfile`, built from the repo root on `oven/bun:1.4.4-slim`.
-- It runs `bun install --frozen-lockfile --production`, builds the replay UI with Bun (06-L1), copies the server source (Bun runs the TS directly) plus `test/helpers/grep-day.ts` (for the in-pod check in 08 §8), and ends with `CMD ["bun", "apps/server/src/main.ts"]`.
+**Node failure** (devil, 2026-11-11): one replica on a ReadWriteOnce volume, so if the node dies the StatefulSet won't start a new pod until the old one is deleted. `deploy/openshift/runbooks/node-failure.md`: confirm the node is really down (never two writers), then `oc delete pod sr-server-0 --force --grace-period=0`; the browsers' queues cover the gap (01 Acceptance → Delivery).
+
+**Image:** `apps/server/Dockerfile`, built from the repo root on `oven/bun:1.4.4-slim`, in **two stages** (architect, devil, 2026-11-11).
+- Stage 1 runs a full `bun install --frozen-lockfile` and builds the replay UI with Vite (`bun --bun vite build`, 06-L1); Vite and the React Compiler are dev dependencies.
+- Stage 2 runs `bun install --frozen-lockfile --production` for the server only, copies `apps/replay-ui/dist` from stage 1, copies the server source (Bun runs the TS directly) plus `test/helpers/grep-day.ts` (for the in-pod check in 08 §8), and ends with `CMD ["bun", "apps/server/src/main.ts"]`.
 - OpenShift runs the container as an arbitrary UID in group 0, so the image makes its own folders group-writable (`chgrp -R 0 … && chmod -R g=u …`). The PVC gets write access from the SCC's `fsGroup`.
 
 ### Observability
@@ -774,13 +782,14 @@ spec:
 - `sr_ingest_requests_total{status,reason}`, `sr_ingest_bytes_total`;
 - `sr_ack_seconds`, `sr_commit_seconds`, `sr_commit_group_items`, `sr_writer_queue_bytes`, `sr_event_loop_lag_seconds`;
 - `sr_seq_gaps`, `sr_flagged_dups_total`, `sr_quota_hits_total`, `sr_rate_limited_total`, `sr_denied_total{reason}`;
-- `sr_fidelity_total{reason}`, `sr_hotspots_total{app}`;
+- `sr_fidelity_total{reason}`, `sr_hotspots_total{app}`, `sr_recorder_cost_ratio{app}` (a histogram of `(ownMs + gateMs) / windowMs` from `sr:cost`, the field data for 08 §6 stage 2);
 - `sr_config_requests_total{app,enabled}`, `sr_enabled_no_start_total{app}`, `sr_override_active`, `sr_config_version_info`;
 - `sr_disk_free_bytes`, `sr_job_seconds{job}`, `sr_seal_last_success_timestamp`, `sr_retention_last_success_timestamp`, `sr_backup_last_success_timestamp`.
 
 **Alerts** (PrometheusRule):
 - **From 01 Monitoring:** a seq gap still open after 1 h; any flagged duplicate; any quota hit; a `pause-budget` rate above baseline.
 - **Silent recorders (devil X20):** for one app, 3 or more `enabled` answers in 30 min that got no seq 0 within 5 min; and `sr_config_requests_total` flat for 15 min **inside the region's business hours** (set per overlay, in UTC): a host deploy that lost the script tag. These replace the old "enabled but silent users" alert, which fired on every user who simply closed the tab.
+- **Server down** (devil, 2026-11-11): `up{job="sr-server"} == 0` or `absent(up{job="sr-server"})` for 5 min. The cluster's Prometheus evaluates it, so it fires when the server can't.
 - **Server health:** commit p99 over 500 ms; event-loop lag p99 over 20 ms (the L1 fallback trigger); 5xx over 1 %; free disk under 15 %; no seal in 26 h; no backup in 26 h; newest snapshot older than 2 h; config file refused; an override active (info); a CLI request failed.
 
 ### Contract change requests (to 03 and 01)
@@ -796,7 +805,7 @@ C1–C9 from the first draft are applied (03, 01 D30, 06). C9 now reads: the rep
 **Do:**
 - Reply to an ingest request only after `writer` reports its file's commit. A 208 or 403 that depends on an uncommitted item in the same group waits for that item's commit.
 - Keep `db.transaction` bodies synchronous. Do hashing and encryption before them, on the main thread.
-- Route every database write, including access rows, seal steps and catalog swaps, through `writer`. Job Workers write only files nobody else has open.
+- Route every database write, including access rows, seal steps and catalog swaps, through `writer`. Job processes write only files nobody else has open.
 - Close the main thread's read handles before a seal, swap, erase rewrite or delete touches a file.
 - Read today's file in short transactions (pages of rows), so its WAL can still checkpoint.
 - Keep every `t` raw client time in storage and DTOs (L19).
@@ -806,7 +815,7 @@ C1–C9 from the first draft are applied (03, 01 D30, 06). C9 now reads: the rep
 
 **Don't:**
 - Don't put anything non-rebuildable in `master.db` (L2).
-- Don't write a day file from anything but `writer`. Job Workers read; the CLI never opens one.
+- Don't write a day file from anything but `writer`. Job processes read; the CLI never opens one.
 - Don't add an admin route or listener on any port (L9).
 - Don't serve `/sr/*` on the UI port, or anything but `/sr/*` and health on the ingest port (L15).
 - Don't inflate, parse or re-gzip a stored chunk on read (L4).
@@ -824,7 +833,10 @@ C1–C9 from the first draft are applied (03, 01 D30, 06). C9 now reads: the rep
 - [ ] **Binding and write key:** a second userId on a session → 403 `user-mismatch`. A different write key on a recording → 403 `write-key`. A missing `X-SR-Write-Key` or `X-SR-Sent-At` → 400. Every chunk of a session has the same `user_id`.
 - [ ] **Limits:** over the body limit → 413; a gzip bomb (inflates past 16 MiB) → 413; bad JSON or schema → 400; rate → 429 `rate` and quota → 429 `quota`, both with `Retry-After`. A flood under one userId from a second IP doesn't use up the first IP's quota.
 - [ ] **Restart mid-batch:** killing the writer before the commit gives 503 and the retry stores the batch once. Killing it after the commit gives 208 on the retry.
-- [ ] **Disk full** (`PRAGMA max_page_count`): 503 to the whole group, ingest refuses below the floor, reads still work, the alert fires.
+- [ ] **Disk full** (`PRAGMA max_page_count`): 503 to the whole group, ingest refuses below the floor, reads still work, the alert fires; `retention --keep-days 7` frees space with holds intact.
+- [ ] **Jobs:** a job process that crashes or is killed mid-run never stops ingest, and the job resumes cleanly on its next run.
+- [ ] **Versions:** a v1 reader opens a day file with a higher additive `user_version`; `batch-future.json` ingests and its unknown reason is served as a note; `/sr/config` fills every default.
+- [ ] **Server down:** with the pod stopped, the `up == 0` alert fires within 5 min.
 - [ ] **Clock skew:** a client 5 min behind → `offset_ms ≈ 300000`, the right day file, `clockOffsetMs ≈ 300000`, and every `t` in the DTOs is still raw client time.
 - [ ] **Midnight:** a session across 00:00 UTC is listed under both days, has two files, and its chunks come back in order across both.
 - [ ] **Late batch:** a batch for a sealed day lands in today's file, is linked through `session_files`, comes back from `chunks` in seq order, and its session is still listed under the batch's own day.
@@ -848,28 +860,32 @@ C1–C9 from the first draft are applied (03, 01 D30, 06). C9 now reads: the rep
 
 ## Tasks
 
-Every slice is done when `bunx tsc --noEmit -p apps/server` passes and `bun test apps/server` passes for the slice's tests. Within the server lane the slices run one after another (S13 and S14 may overlap; they share no files).
+Every slice is done when `bunx tsc --noEmit -p apps/server` passes and `bun test apps/server` passes for the slice's tests. Within the server lane the slices run one after another (S13 and S14 may overlap; they share no files). **Order** (architect, 2026-11-11): S1 → S2 → S3a → S3b → S4 → S6 → S7 → S8 → S5a → S5b → S9 → S11 → S12 → S13 ∥ S14, so the query API and `/sr/config` exist in B3 for the walking skeleton (01 Batches) and K5.
 `apps/server/src/app.ts` is the wiring file: S1 owns it, and each later slice may add only its own wiring lines, because server slices never run at the same time (01, rule 3).
 
 - [ ] **S1 Scaffold** — owns: `apps/server/{package.json,tsconfig.json}`, `apps/server/src/{main,app,env,log}.ts`, `apps/server/src/http/**`, `apps/server/src/ops/fs-check.ts`, `apps/server/test/{http,fs-check}.test.ts` — batch: B1 — depends on: 03 T1 — done when: both ports, the Host check (421), the `X-SR-UI` guard (400 `ui-header`, with a stub audit), health routes, the D30 CSP constant, the SPA fallback and the `/assets/` guard are tested, plus the mountinfo fixtures.
 - [ ] **S2 Storage layer** (schemas, migrations, file router with the L6 rule, read-handle cache, triggers) — owns: `apps/server/src/store/**`, `apps/server/test/store.test.ts` — batch: B2 — depends on: S1 — done when: the schema, append-only trigger, day-routing (today, grace, sealed day → today) and handle-release tests pass.
 - [ ] **S3a Writer: commit and ack** (RPC, group commit, ack after commit, failed group, shutdown flush, catalog after ack, mark for repair) — owns: `apps/server/src/db/{rpc,writer,types}.ts`, `apps/server/test/writer-commit.test.ts` — batch: B2 — depends on: S2 — done when: the commit-then-ack, failed-group, restart-mid-batch and disk-full tests pass, with a stub `decide` that accepts everything.
 - [ ] **S3b Writer: decide, de-dup, binding, catalog** (LRU prefix map, preload, binding, write key, target file, gaps, catalog rollups, quota counters) — owns: `apps/server/src/db/{decide,dedup,catalog}.ts`, `apps/server/test/{decide,dedup,catalog}.test.ts` — batch: B2 — depends on: S3a — done when: the duplicate, binding, write-key, eviction-and-preload, no-I/O-in-decide, gaps and `MIN(offset_ms)` tests pass.
-- [ ] **S4 Ingest route** (headers, decode, identity hash, gzip-once, blob hash, limits, zod, sparse actions, marks, status mapping, config header stub) and **`grep-day`** — owns: `apps/server/src/ingest/**`, `apps/server/test/ingest.test.ts`, `apps/server/test/helpers/grep-day.ts` — batch: B2 — depends on: S3b — done when: the limit, 413/400/429/503, missing-header, gzip-vs-plain identity, sparse-kind (including console rows for `error` and `warn` only), marks, clock-skew and `grep-day` tests pass.
-- [ ] **S5a Startup and rebuild** (startup order, the job-Worker runner, full rebuild, live rebuild swap, repair) — owns: `apps/server/src/ops/{startup,run-job}.ts`, `apps/server/src/jobs/rebuild.ts`, `apps/server/test/{startup,rebuild}.test.ts` — batch: B2 — depends on: S4 — done when: the rebuild-equality, live-swap, repair-idempotence and startup-order tests pass.
-- [ ] **S5b Seal, day close and backups** — owns: `apps/server/src/ops/day-close.ts`, `apps/server/src/jobs/{seal,backup}.ts`, `apps/server/test/{day-close,backup}.test.ts` — batch: B2 — depends on: S5a — done when: the seal, seal-resume, ack-during-seal, late-batch and backup-restore tests pass.
-- [ ] **S6 Access and audit** — owns: `apps/server/src/api/access.ts`, `apps/server/src/audit/**`, `apps/server/test/access.test.ts` — batch: B3 — depends on: S5b — done when: the cookie, grant, `denied` row (grant and `ui-header`) and 15-min chunk-row tests pass.
+- [ ] **S4 Ingest route** (headers, decode, identity hash, gzip-once, blob hash, limits, zod, sparse actions, marks, status mapping, config header stub) and **`grep-day`** — owns: `apps/server/src/ingest/**`, `apps/server/test/ingest.test.ts`, `apps/server/test/helpers/grep-day.ts` — batch: B2 — depends on: S3b — done when: the limit, 413/400/429/503, missing-header, gzip-vs-plain identity, sparse-kind (including console rows for `error` and `warn` only, and the fidelity row encoding), `batch-future.json` accepted (03-L16), marks, clock-skew and `grep-day` tests pass.
+- [ ] **S5a Startup and rebuild** (startup order, the job-process runner (`Bun.spawn`, kill on timeout), full rebuild, live rebuild swap, repair) — owns: `apps/server/src/ops/{startup,run-job}.ts`, `apps/server/src/jobs/rebuild.ts`, `apps/server/test/{startup,rebuild}.test.ts` — batch: B3 — depends on: S8 — done when: the rebuild-equality, live-swap, repair-idempotence and startup-order tests pass.
+- [ ] **S5b Seal, day close and backups** — owns: `apps/server/src/ops/day-close.ts`, `apps/server/src/jobs/{seal,backup}.ts`, `apps/server/test/{day-close,backup}.test.ts` — batch: B3 — depends on: S5a — done when: the seal, seal-resume, ack-during-seal, long-grace (two open day files), late-batch, hold-file backup and backup-restore tests pass, and a job process killed mid-run leaves ingest acking.
+- [ ] **S6 Access and audit** — owns: `apps/server/src/api/access.ts`, `apps/server/src/audit/**`, `apps/server/test/access.test.ts` — batch: B2 — depends on: S4 — done when: the cookie, grant, `denied` row (grant and `ui-header`) and 15-min chunk-row tests pass.
 - [ ] **S7 Query API** (sessions by "touches day", detail with gaps, bands and notes, actions, framed chunks, `QueryApi` type) — owns: `apps/server/src/api/{query,detail,chunks,index}.ts`, `apps/server/test/{query,detail,chunks}.test.ts` — batch: B3 — depends on: S6 — done when: the paging, touches-day, half-open range, gaps-and-bands, first-row-per-seq, integrity, no-inflate, `readChunks` round-trip and cross-file ordering tests pass, and `hc<QueryApi>` compiles in a test.
 - [ ] **S8 Config and hotspots** (ConfigMap file, allow-list, holds, `/sr/config`, the X20 counters, hotspots) — owns: `apps/server/src/config/**`, `apps/server/src/api/hotspots.ts`, `apps/server/test/{config,hotspots}.test.ts` — batch: B3 — depends on: S7 — done when: the reload, version-refusal, allow-list, kill-switch, holds, enabled-no-start and aggregation tests pass.
-- [ ] **S9 Retention, CLI and override** (hold-aware retention with verified copies, the request-file ops loop, the CLI, the override file, the erasure runbook's `erase` step; no admin listener and no erase tooling beyond the runbook) — owns: `apps/server/src/ops/{retention,inbox,override,erase}.ts`, `apps/server/src/jobs/{retention,erase}.ts`, `apps/server/src/cli.ts`, `apps/server/test/{retention,cli,override,erase}.test.ts` — batch: B3 — depends on: S8 — done when: the dry-run, hold-copy verification, hold-lifted, request-file, interrupted-request, override (fail closed, survives restart) and erasure-rewrite tests pass.
-- [ ] **S10 Crypto-shredding toggle** — owns: `apps/server/src/crypto/**`, `apps/server/test/crypto.test.ts` — batch: B3 — depends on: S9 — done when: the round-trip, wrong-AAD, one-key-per-user and erase-key → `unreadable` tests pass. It plugs into the `Cipher` seam (declared in `src/db/types.ts` by S3a) that the ingest (S4) and chunk-read (S7) code already call; until then it is a pass-through.
-- [ ] **S11 Asset store** — owns: `apps/server/src/assets/**`, `apps/server/test/assets.test.ts` — batch: B4 — depends on: S10 — done when: the negotiation, hash-mismatch, L14 header and GC tests pass.
+- [ ] **S9 Retention, CLI and override** (hold-aware retention with verified copies, the request-file ops loop, the CLI, the override file, the erasure runbook's `erase` step; no admin listener and no erase tooling beyond the runbook) — owns: `apps/server/src/ops/{retention,inbox,override,erase}.ts`, `apps/server/src/jobs/{retention,erase}.ts`, `apps/server/src/cli.ts`, `apps/server/test/{retention,cli,override,erase}.test.ts` — batch: B3 — depends on: S5b — done when: the dry-run, hold-copy verification, hold-lifted, request-file, interrupted-request, override (fail closed, survives restart), `--keep-days` and erasure-rewrite tests pass.
+- [ ] **S10 Crypto-shredding toggle** — owns: `apps/server/src/crypto/**`, `apps/server/test/crypto.test.ts` — batch: **after Gate 2** (user, 2026-11-11: off for the pilot, so not on v1's critical path) — depends on: S9 — done when: the round-trip, wrong-AAD, one-key-per-user and erase-key → `unreadable` tests pass. It plugs into the `Cipher` seam (declared in `src/db/types.ts` by S3a) that the ingest (S4) and chunk-read (S7) code already call; until then it is a pass-through.
+- [ ] **S11 Asset store** — owns: `apps/server/src/assets/**`, `apps/server/test/assets.test.ts` — batch: B4 — depends on: S9 (on for the pilot, D33) — done when: the negotiation, hash-mismatch, L14 header and GC tests pass.
 - [ ] **S12 Observability** — owns: `apps/server/src/ops/metrics.ts`, `deploy/openshift/base/prometheusrule.yaml`, `apps/server/test/metrics.test.ts` — batch: B4 — depends on: S11 — done when: `/metrics` exposes every listed series (prom-client on Bun is verified here), and the rule file holds every listed alert.
 - [ ] **S13 Backlog-drain load test** — owns: `apps/server/test/load/**` — batch: B4 — depends on: S12, 02 K3 (P1's rates) — done when: the drain acceptance item passes locally at P1's rates (the L11 rates if K3 changed nothing), and main-thread CPU and event-loop lag p99 are recorded. It runs once: K3 is done long before B4.
-- [ ] **S14 Image and OpenShift manifests** — owns: `apps/server/Dockerfile*`, `deploy/openshift/**` except `deploy/openshift/base/prometheusrule.yaml` (S12) — batch: B4 — depends on: S12; also waits for K3 (PVC size, resource requests) — done when: `oc kustomize` renders each overlay (or a `bun test` YAML check if `oc` is missing); a test asserts `replicas: 1`, RWO, no NFS class, the probes, the Secret refs, two Service ports, the Route on `ui`, and one NetworkPolicy per port; the runbooks (`erasure`, `kill-switch`, `restore`) exist; and the image builds locally.
-- [ ] **S15 Real-workspace integration** (scope rename, registry, real storage classes, CIDRs, backup target, pilot config) — owns: `deploy/openshift/overlays/**`, `apps/server/package.json` — batch: B5 — depends on: S14 and open questions 1–6 — done when: the pilot overlay renders, the image runs in the pilot namespace, and the restore drill passes there with the escrowed keys (devil X21).
+- [ ] **S14 Image and OpenShift manifests** — owns: `apps/server/Dockerfile*`, `deploy/openshift/**` except `deploy/openshift/base/prometheusrule.yaml` (S12) — batch: B4 — depends on: S12; also waits for K3 (PVC size, resource requests) — done when: `oc kustomize` renders each overlay (or a `bun test` YAML check if `oc` is missing); a test asserts `replicas: 1`, RWO, no NFS class, the probes, the Secret refs, two Service ports, the Route on `ui`, and one NetworkPolicy per port; the runbooks (`erasure`, `kill-switch`, `restore`, `node-failure`) exist; and the two-stage image builds locally.
+- [ ] **S15 Real-workspace integration** (scope rename, registry, real storage classes **encrypted at rest**, CIDRs, the off-PVC backup target, per-region seal grace, pilot config) — owns: `deploy/openshift/overlays/**`, `apps/server/package.json` — batch: B5 — depends on: S14 and open questions 1–6 — done when: the pilot overlay renders, the image runs in the pilot namespace, and the restore drill passes there with the escrowed keys (devil X21).
+- [ ] **S16 oauth-proxy, ready if needed** (user, 2026-11-11; D38's chosen later approach) — owns: `deploy/openshift/components/oauth-proxy/**`, `apps/server/src/api/access.ts` (read the forwarded user name when the component is on) — batch: B5 — depends on: S14, S6 — done when: a Kustomize component adds the OpenShift `oauth-proxy` sidecar in front of port 3002; with it on, the access log records the forwarded user name instead of the typed one; with it off, nothing changes. Switched on if the DPIA or the user asks.
 
 ## Risks
+
+- **Bun Worker termination is experimental** (architect, 2026-11-11): resolved by running jobs as child processes (L1); only `writer` is a Worker, and it is never terminated.
+- **APAC day close during trading** (architect, devil, 2026-11-11): resolved by a per-overlay seal grace (L6).
 
 | Risk | Mitigation |
 |---|---|
@@ -908,3 +924,4 @@ Still open, needed before B5 (01 Q36, Q37):
 - 2026-11-10 — Console capture (01 D43, 03-L15): `sr:console` `error` and `warn` lines become action rows and `console.error` counts as an error; S4 tests it. Ingest walks each batch once, so MVP2's `extract()` (09) can plug in.
 - 2026-11-10 — Console and analytics review merged (leader): console action rows carry `name` = level, a 200-character summary and `count` (new `count` column); `console.error` lines count in `counts.consoleErrors` (new `console_errors` column), not `errors`; L1 notes 09's per-query runner.
 - 2026-11-11 — Replay UI build note reworded (leader, from 06 L1): Vite with `build.assetsDir: 'ui'`; the static route also serves `/ui/*` and `/theme-boot.js`.
+- 2026-11-11 — Overall architect and devil review (01 → Overall review resolution): jobs run as child processes (L1); per-overlay seal grace, with backup and retention right after each seal (L6, user: days stay UTC); quota and rate sized for 4 windows (L11, user); `holds/` in the daily off-PVC backup, an off-PVC target as a pilot precondition, storage and bucket encrypted at rest (user); emergency `retention --keep-days`; day-file version rule; fidelity row encoding and console `level` mapping; tolerant ingest and a parsed config; `sr_recorder_cost_ratio`; `up == 0` alert; node-failure runbook; two-stage image; server lane reordered (S6–S8 before S5a–S5b); S10 after Gate 2 and S11 depends on S9 (user); new S16 oauth-proxy component, ready if needed (user).

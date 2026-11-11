@@ -27,7 +27,7 @@ Every task comes from a plan file. Start with the master, then your sub-plan:
 | Plan | Covers |
 |---|---|
 | `plan/01-session-replay.md` | **Master:** goal, scope, decisions D1–D44, batches B0–B5, open questions, risks; tasks X1–X2 |
-| `plan/02-spikes.md` | Performance spike (incl. console load), rrweb gate patch, module-federation spike; tasks K1–K5 |
+| `plan/02-spikes.md` | Real-app profile, performance spike (incl. console load), rrweb gate patch, module-federation spike; tasks K0–K5 |
 | `plan/03-protocol.md` | **Shared contracts:** events (incl. `sr:console`), ingest, config, bridge, query API, `@sr/protocol/secrets`; tasks T1–T2 |
 | `plan/04-recorder.md` | `packages/recorder-engine`, `packages/recorder`; tasks R0–R11 |
 | `plan/05-server.md` | `apps/server`, `deploy/openshift`; tasks S1–S15 |
@@ -45,7 +45,7 @@ stop and ask.
 | Folder | What lives there |
 |---|---|
 | `apps/` | `server` (Bun + Hono + SQLite; also serves the replay UI), `replay-ui` (TanStack Router SPA: Mantine 9, flexlayout-react, React Compiler, built with Vite). |
-| `packages/` | `protocol` (shared zod contracts; entries `.`, `/publish` and `/secrets`, the last two with no imports), `recorder-engine` (the only rrweb importer), `recorder` (browser recorder), `state-plugin` (unplugin build plugin). |
+| `packages/` | `protocol` (shared zod contracts; entries `.`, `/core` (zod-free types and decoders), `/publish` and `/secrets` (the last two with no imports)), `recorder-engine` (the only rrweb importer), `recorder` (browser recorder), `state-plugin` (unplugin build plugin). |
 | `fixtures/apps/` | Apps that imitate the real workspace, for tests. |
 | `deploy/openshift/` | Per-region manifests. |
 | `docs/integration/`, `examples/` | Integration guide material. |
@@ -68,7 +68,7 @@ The one exception to Bun's bundler is `apps/replay-ui`, which builds with **Vite
 
 ## Hard rules
 
-1. **Contract first.** Shapes that cross a boundary live in `packages/protocol` (plan 03). Changes there are **additive only** and need the plan owner's approval. The recorder and app bundles import only the zod-free entries (`@sr/protocol/publish`, `@sr/protocol/secrets`) or use `import type`.
+1. **Contract first.** Shapes that cross a boundary live in `packages/protocol` (plan 03). Changes there are **additive only** and need the plan owner's approval, and every reader tolerates unknown tags, fields and enum values (03-L16). The recorder and app bundles import only the zod-free entries (`@sr/protocol/core`, `@sr/protocol/publish`, `@sr/protocol/secrets`) or use `import type`.
 2. **Only `packages/recorder-engine` imports rrweb.** Pin every `@rrweb/*` package to one exact version.
 3. **The recorder has no framework dependencies.** No React and no state libraries: it runs outside every mini-app.
 4. **Never record secrets:** password fields, one-time codes, auth tokens (JWT/`Bearer`, `token`-style URL parameters, passwords in URLs) and secret-named keys, in state **and in console lines** (D43). Mask or strip them in the browser before anything is sent. Use `isSecretKey` and `maskCutToken` from `@sr/protocol/secrets`; never copy the list. In the MVP everything else is recorded unmasked on purpose (plan 01, D18).

@@ -19,7 +19,7 @@ Inherits D2, D5, D11, D16, D20, D22, D29, D33, D36 from the parent plan. Local d
 |---|---|---|
 | L1 | Our events are **rrweb custom events** (`type: 5`) whose `data.tag` starts with `sr:`. The engine stamps and inserts them itself; it never uses `record.addCustomEvent`, which re-stamps (D2). | rrweb's Replayer keeps working on the mixed stream and ignores tags it doesn't know. |
 | L2 | Every event has a **stream position** `{ recordingId, seq, idx }`, where `idx` is its index in the batch. Seeking to an action uses its position, not its time (D16). | Positions are unique and ordered even when many events share a millisecond. |
-| L3 | Protocol version `v: 1` on every batch, bridge message and config. Changes are **additive only**: new tags or fields, never renamed or removed ones. The replay UI ignores unknown tags. | Old recordings must replay after upgrades (golden-recording tests). |
+| L3 | Protocol version `v: 1` on every batch, bridge message and config. Changes are **additive only**: new tags or fields, never renamed or removed ones. Every reader tolerates what a newer writer adds (L16). | Old recordings must replay after upgrades (golden-recording tests). |
 | L4 | **`zod` schemas are the source of truth.** TypeScript types come from `z.infer`, and the server validates every request with the same schemas. zod 4 form throughout: `z.record(z.string(), X)`. | One definition and no drift; Hono's validator takes zod directly. zod 4.6's one-argument `z.record(X)` passes at runtime but fails the type check. |
 | L5 | JSON inside; gzip on the wire. A batch body is `gzip` (`Content-Encoding: gzip`) or plain JSON. The `pagehide` tail sends plain JSON, because `CompressionStream` is async. | Simple and debuggable; gzip makes the size fine. |
 | L6 | The package scope is `@sr/*` in this baseline. The real workspace may rename it (see [08-integration.md](08-integration.md)). | |
@@ -32,6 +32,9 @@ Inherits D2, D5, D11, D16, D20, D22, D29, D33, D36 from the parent plan. Local d
 | L13 | **A write key per recording.** The recorder makes a random key per recording, keeps it in memory, in sessionStorage and in each queued batch row (another tab may upload leftovers), and sends it as `X-SR-Write-Key`. The server stores its hash with seq 0 (if seq 0 never arrives, with the first stored batch); later batches of that recording must match. It is not an identity token. | Session ids are visible in the session list, so without it anyone on the network could append batches to a colleague's live recording (devil X16). |
 | L14 | **`/api/*` requires the header `X-SR-UI: 1`.** | The replay iframe can request same-origin images and styles, but it can't add headers, so a forged recording can't call the API with the viewer's cookie (devil X14). |
 | L15 | **Console lines are `sr:console` events** (D43).<br>• **Action rows:** only `error` and `warn` lines become server action rows (`name` = the level, `summary` = the message cut to 200 characters, plus `count`). `info`, `log` and `debug` stay in the chunks and reach the action list as local rows (06-L14).<br>• **Counts:** `counts.errors` stays the count of `sr:error` events. The new `counts.consoleErrors` counts `console.error` lines not marked `same`.<br>• **`same: true`** marks an event whose Error object the other path already reported.<br>• **`dropped`** counts lines the rate limit dropped since the last line.<br>• **Cap:** a recording stops capturing console lines at `maxPerRecording` and emits a `console-capped` note. | Keeps the sparse action index small. Keeps `counts.errors` meaning what it meant, so the change stays additive (L3). Stops one React error from counting twice (devil R2–R4). |
+| L16 | **Tolerant readers** (architect, devil, 2026-11-11). A reader is any code that consumes data another part wrote: the server reading batches and bridge messages, the UI reading the stream and the API, the recorder reading config.<br>• Readers accept unknown tags, unknown fields and **unknown enum values**. Writing schemas stay strict; reading schemas widen each enum to `z.string()` (for example `notes[].reason`, `ActionRow.kind`, `sr:state.kind`).<br>• `bandKind(reason)` in `@sr/protocol/core` maps a reason to its kind; an unknown reason is a **note labelled with the raw reason**. An unknown `ActionKind` is a generic row with its `name` and `summary`.<br>• The server always serves `RecorderConfig.parse(merged)`, and the recorder keeps **its own default for every config field it reads** (04), typed from `z.input`, so a newer recorder works against an older server.<br>• Deploy order (08 §6): every region's server and UI first, then recorders, then plugins.<br>• `fixtures/batch-future.json` (an unknown tag, reason, state kind, action kind and config field) must pass in 04, 05 and 06. | The recorder (per host build), the plugin runtime (per remote build) and the server and UI (per region) never deploy together. Without this, every v1.1 or MVP2 enum value breaks an older reader (09, 10). |
+| L17 | **`@sr/protocol/core` is a zod-free entry** (architect, 2026-11-11): the TypeScript types, `posKey`, `parsePos`, `comparePos`, `readChunks`, `srEvent(e)` (a tag check plus the typed payload) and `bandKind`. The recorder, the engine, the server's ingest walk, the UI, 09's `extract` and 10's rules all decode `sr:*` events through it. | Five places parse `sr:*` payloads; L16's fallbacks must behave the same in all of them, and the recorder must never pull in zod through a value import. |
+| L18 | **Version stamps from v1** (architect, devil, 2026-11-11): `sr:meta.recorderVersion` and `rrwebVersion`; `rv` (recorder version) and `tz` on every `IngestBatch`; `meta.plugin` (the plugin runtime's version) on `register`. All optional. | The UI can warn when a recording's rrweb is newer than its replayer (anti-goal 2); 10's "recorded before AMPS logging" and "plugin older than 1.1" copy needs them; 09's `extract()` sees one batch at a time and needs `tz` on it. |
 
 ## Design
 
@@ -81,7 +84,7 @@ export const ConsoleLevel = z.enum(['error', 'warn', 'info', 'log', 'debug']); /
 export const SrTag = z.enum([
   'sr:click', 'sr:input', 'sr:nav', 'sr:error', 'sr:report',
   'sr:state', 'sr:fidelity', 'sr:hotspot', 'sr:asset', 'sr:meta', 'sr:rate-caps',
-  'sr:net', 'sr:redacted', 'sr:close', 'sr:console',
+  'sr:net', 'sr:redacted', 'sr:close', 'sr:console', 'sr:cost',
 ]);
 
 export const FidelityReason = z.enum([
@@ -129,7 +132,7 @@ export const SrPayload = {
     removed: z.array(z.string()).optional(),                                 // op = action: deleted top-level keys
   }),
   'sr:fidelity': z.object({ reason: FidelityReason, start: z.boolean(), detail: z.string().optional() }),
-  'sr:hotspot':  z.object({ area: z.string(), remote: z.string().optional(),
+  'sr:hotspot':  z.object({ area: z.string(), remote: z.string().optional(),   // remote: from data-sr-grid="<remote>/<grid>" (04, 08-L7)
                             mutationsPerSec: z.number(), pausedMs: z.number() }),
   'sr:asset':    z.object({ url: z.string(), sha256: z.string(), type: z.string() }),   // D33
   'sr:meta':     z.object({
@@ -139,6 +142,7 @@ export const SrPayload = {
     userAgent: z.string(), viewport: z.object({ w: z.number(), h: z.number() }),
     tz: z.string().optional(),                                               // IANA zone, e.g. 'Asia/Tokyo' (D42)
     tzOffsetMin: z.number().optional(),                                      // UTC offset at recording start
+    recorderVersion: z.string().optional(), rrwebVersion: z.string().optional(), // L18
   }),
   'sr:rate-caps': z.object({ configVersion: z.string(), caps: Rec(Rec(z.number())) }), // D36 legend
   'sr:net':      z.object({ method: z.string(), url: z.string(),            // token params stripped
@@ -148,6 +152,9 @@ export const SrPayload = {
                             userinfo: z.number().int().optional(),            // scheme://user:password@ (D43)
                             urlParams: z.number().int() }),                  // scrubber counts per batch
   'sr:close':    z.object({ reason: z.enum(['pagehide', 'logout', 'user-switch', 'kill', 'stopped']) }), // clean end (devil X19)
+  'sr:cost':     z.object({ windowMs: z.number(),                             // once a minute (devil, 2026-11-11)
+                            ownMs: z.number(), gateMs: z.number(), snapshotMs: z.number(),
+                            strikes: z.number().int(), paused: z.boolean() }),  // the self-budget's own numbers: field data for 08 §6 stage 2
 } as const;
 ```
 
@@ -161,10 +168,12 @@ server-made reasons to `SessionDetail` itself; they never appear in the stream.
 | Gap band that runs **to the next full snapshot** (the screen is unknown until then) | `missing-batches`, `chunk-unreadable` | hatched band; the engine shows "screen unknown" instead of applying incremental events (04) |
 | Band, screen still complete | `snapshot-slow`; `no-state` on the state lane | thin band |
 | Note | `pipeline-fallback`, `state-capped`, `no-clean-close`, `caps-off`, `console-capped` | a tick on the scrubber |
+| Note (unknown) | any reason this reader doesn't know (L16) | a tick labelled with the raw reason |
 
-**When `no-state` starts and ends.** 10 s after recording starts, the recorder opens a `no-state`
-band for each remote named in `sr:meta.remotes` that has no registered store with that `app`. The
-band closes when such a store registers.
+**When `no-state` starts and ends.** flexlayout loads a remote when its tab first opens, so a
+remote that hasn't loaded isn't missing state (devil, 2026-11-11). 10 s after a remote's entry
+has loaded (a `resource` performance entry for its URL in `sr:meta.remotes`), the recorder opens
+a `no-state` band if no store with that `app` has registered. The band closes when one registers.
 
 An `sr:*` event on the wire is an rrweb custom event:
 
@@ -190,6 +199,8 @@ export const IngestBatch = z.object({
   seq: z.number().int().min(0),
   userId: UserId,
   app: z.string(),
+  rv: z.string().optional(),                            // recorder version (L18)
+  tz: z.string().optional(),                            // IANA zone, so 09's extract() sees it per batch (L18)
   events: z.array(z.unknown()).min(1),                  // rrweb events + sr:* events
 });
 // Not in the body: sentAt and the write key. They travel in headers (L7, L13).
@@ -243,7 +254,9 @@ export const AssetMissingRes = z.object({ missing: z.array(Sha256) });
 ### Recorder config (`src/config.ts`)
 
 This is what the browser receives: the server has already resolved the allow-list for this user.
-The file the server reads (a ConfigMap, 05-L8) has its own format, owned by 05.
+The file the server reads (a ConfigMap, 05-L8) has its own format, owned by 05. The server always
+sends `RecorderConfig.parse(merged)`, and the recorder also keeps its own default for every field
+it reads (L16), so neither side relies on the other's version.
 
 ```ts
 // Sample — the shape to build, not final code.
@@ -269,14 +282,15 @@ export const RecorderConfig = z.object({
 });
 ```
 
-Sample served config for the pilot desk:
+Sample served config for the pilot desk. `cpuPct` stays 3 until K3 calibrates it (02); the asset
+cache is on for the pilot, with the allow-list from K0 (user, 2026-11-11):
 
 ```json
 { "v": 1, "version": "2026-11-10.3", "enabled": true, "killSwitch": false,
   "checkpointMinutes": 12, "checkpointMutations": 200000,
   "budget": { "cpuPct": 3, "longFrameMs": 50, "resumeAfterMs": 10000 },
   "rateCaps": { "positions": { "bid": 2, "ask": 2, "mid": 2 } },
-  "assetCache": { "enabled": false, "allow": ["/static/img/", "https://fonts.corp.example/"] },
+  "assetCache": { "enabled": true, "allow": ["/static/img/", "https://fonts.corp.example/"] },
   "console": { "levels": ["error", "warn"], "maxPerSec": 10, "maxChars": 2000, "maxPerRecording": 2000 },
   "pipeline": "main" }
 ```
@@ -294,6 +308,7 @@ export const BridgeMsg = z.object({
   changes: z.record(z.string(), z.unknown()).optional(),  // action: changed top-level keys ({ $root } if not an object)
   removed: z.array(z.string()).optional(),                // action: deleted top-level keys
   meta: z.object({ app: z.string(), lib: z.string(),      // register: 'redux@4.2.1'
+                   plugin: z.string().optional(),         // register: the plugin runtime's version (L18)
                    deny: z.array(z.string()).optional() }).optional(), // register: denyKeys, regexes as '/src/flags'
   t: z.number(),                        // Date.now() at capture: rrweb's clock (L12)
 });
@@ -471,7 +486,10 @@ export const comparePos = (a: StreamPos, b: StreamPos, order: ReadonlyMap<string
 - `batch-v1-fidelity.json`: a pause band, a hidden-tab band, a `state-capped` note, a snapshot
   with `NotRecorded` keys, a rate-cap legend.
 - `session-v1-golden/`: a complete small recording. **Every future rrweb or protocol version must
-  still replay it** (L3).
+  still replay it** (L3). It is regenerated once from the real recorder's output at the B3
+  walking skeleton (01 Batches), so 05's and 06's fixture tests use real output from then on.
+- `batch-future.json`: an unknown tag, an unknown fidelity reason, an unknown `sr:state.kind`, an
+  unknown action kind and an unknown config field (L16). 04, 05 and 06 must accept it.
 - `query-v1/`: one sample per JSON query schema, plus `chunks-v1.bin` (a framed response built from
   the batch fixtures by `fixtures/build-chunks.ts`). 06's mock serves them; 05's tests compare
   against them.
@@ -487,6 +505,8 @@ Every package tests against these fixtures, so parallel work meets at the same s
 - [ ] `publish`: never throws (even with a broken queue object); does nothing when `killed`;
       before adoption the queue holds only `register` messages after 10,000 actions.
 - [ ] `parsePos(posKey(p))` round-trips; `comparePos` orders across two recordings.
+- [ ] Tolerant readers (L16): the reading schemas accept `batch-future.json`; `bandKind` maps an
+      unknown reason to a note; the built `@sr/protocol/core` and `publish` contain no zod.
 - [ ] `readChunks` round-trips `chunks-v1.bin`, including an `unreadable` chunk with 0 bytes and a
       response cut by `next`.
 
@@ -494,9 +514,10 @@ Every package tests against these fixtures, so parallel work meets at the same s
 
 - [ ] T1 `packages/protocol`: schemas, types, position helpers, chunk framing and the `publish`
   entry — owns: `packages/protocol/{package.json,tsconfig.json,src/**,test/**}` — batch: **B1** —
-  done when the Acceptance items pass and `exports` has `.`, `./publish` and `./secrets` (`isSecretKey`, moved from 04's serializer, and `maskCutToken`; no imports; D43).
+  done when the Acceptance items pass and `exports` has `.`, `./core` (zod-free, L17), `./publish` and `./secrets` (`isSecretKey`, moved from 04's serializer, and `maskCutToken`; no imports; D43).
 - [ ] T2 Golden fixtures — owns: `packages/protocol/fixtures/**` — batch: **B1** — depends on: T1 —
-  done when the fixtures validate and `session-v1-golden` replays in the spike Replayer.
+  done when the fixtures validate, `batch-future.json` is in place (L16), and `session-v1-golden`
+  replays in the spike Replayer (it is regenerated from real output at the B3 walking skeleton).
 
 ## Risks
 
@@ -504,6 +525,7 @@ Every package tests against these fixtures, so parallel work meets at the same s
 |---|---|
 | A late contract change ripples into every package. | Additive-only rule (L3); contract changes go through the leader and get a Log line here. |
 | `zod` adds weight to the recorder or app bundles. | The recorder imports types only (`import type`); apps import only `@sr/protocol/publish` (L10). Only the server validates at runtime. |
+| Recorder, plugin and server versions skew across regions and host builds (architect, devil, 2026-11-11). | Tolerant readers, a recorder default per config field and the deploy order (L16); version stamps (L18); `batch-future.json`. |
 | The chunk framing is our own format. | It is tiny, shared by server and UI through `readChunks`, and round-trip tested; R0 checks `DecompressionStream` on concatenated blobs. |
 
 ## Log
@@ -530,3 +552,4 @@ Every package tests against these fixtures, so parallel work meets at the same s
 - 2026-11-10 — Open-question answers (user): `sr:meta` gains `tz` and `tzOffsetMin` for the recorded user's local time (D42); the viewer grant covers every session in that browser for 8 h, so `AccessReq.sessionId` is optional (D38); `app` on clicks, inputs and action rows is reserved, not filled in the MVP (Q27).
 - 2026-11-10 — Console capture (01 D43): `ConsoleLevel`, the `sr:console` tag and event, `count` on `sr:error`, `RecorderConfig.console` (default `error` and `warn`, 10/s, 2,000 chars), `ActionKind` `console` with `level` and `count` on `ActionRow`, `counts.errors` includes `console.error`; L15: only `error` and `warn` become server action rows. All additive. MVP2 analytics contracts (`Fact`, `AnalyticsQuery`, `AnalyticsResult`, `domProbes`) are added additively at MVP2 start (09 AN0).
 - 2026-11-10 — Console and analytics review merged (leader). `sr:error` and `sr:console` gain `dropped` and `same`; `sr:redacted` gains `userinfo`; `console-capped` note; `RecorderConfig.console` gets per-field defaults, bounds and `maxPerRecording` with `.prefault({})`; `counts.errors` stays `sr:error` only and the new `counts.consoleErrors` holds console errors (L15 rewritten); new zod-free entry `@sr/protocol/secrets` with `isSecretKey` and `maskCutToken` (T1); T2 fixtures carry console and error lines. All additive.
+- 2026-11-11 — Overall architect and devil review (01 → Overall review resolution): L16 tolerant readers (widened enums on the read side, `bandKind` default, the server serves the parsed config, the recorder's own defaults, deploy order, `batch-future.json`); L17 zod-free `@sr/protocol/core`; L18 version stamps (`recorderVersion`, `rrwebVersion`, `rv`, `tz`, `meta.plugin`); `sr:cost` once a minute; `no-state` only after a remote's entry has loaded; hotspot `remote` from `data-sr-grid`; the pilot sample turns the asset cache on (user); the golden recording is regenerated from real output at the B3 walking skeleton.

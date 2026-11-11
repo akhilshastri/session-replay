@@ -37,7 +37,7 @@ L12 (raw client time), L13 (write key).
 | L14 | **`sr:state` values are serialized once, in idle time, key by key.** Each top-level key is capped at 256 KB, and a snapshot at about 2 MB. An over-cap key becomes `NotRecorded {why:'capped', bytes}` with a `state-capped` note; a denied key (`meta.deny`) becomes `NotRecorded {why:'denied'}`. The text is embedded as raw JSON at encode. | Redux state is immutable, so a held reference is a faithful snapshot. One walk, and live references never cross `postMessage`. A per-key cap keeps the rest of a big store visible instead of dropping the whole snapshot (devil X11); placeholders tell the viewer what's missing (X3). |
 | L15 | *Removed 2026-11-10.* It was the release rule for emit-level coalescing, which D23 dropped. The id is not reused. | |
 | L16 | **`sr:net {method, url, status, ms}` comes from the engine's own fetch/XHR wrapper** (about 40 lines). rrweb's network plugin is not used. | D1: the plugin loses status and timing once the 250-entry resource-timing buffer is full, and it wraps every request body (architect A7, devil X5). 05 builds `net` rows without parsing rrweb shapes (D25). |
-| L17 | **Two base URLs.** The bundles (`sr-loader.js`, `sr-recorder.js`, `sr-worker.js`) sit together in one folder the host serves, outside `/sr/`, e.g. `/sr-recorder/1.4.0/`. The loader loads its siblings relative to its own `src`. The API base (`data-endpoint`, default `/sr`) is where config, ingest and asset upload go; the host's gateway routes it to the region's server (08 §2c). | The host controls the recorder version through its own build (08-L1), the gateway's `/sr/` route never collides with static files, and a versioned folder can be cached forever. (Leader, when merging 04 with 08.) |
+| L17 | **Two base URLs.** The bundles (`sr-loader.js`, `sr-recorder.js`, `sr-worker.js`) sit together in one folder the host serves, outside `/sr/`, e.g. `/session-recorder/1.4.0/`. The folder name never starts with `sr` (devil, 2026-11-11): a gateway rule written as a plain `/sr` prefix would send the bundles to the ingest port. The loader loads its siblings relative to its own `src`. The API base (`data-endpoint`, default `/sr`) is where config, ingest and asset upload go; the host's gateway routes it to the region's server (08 §2c). | The host controls the recorder version through its own build (08-L1), the gateway's `/sr/` route never collides with static files, and a versioned folder can be cached forever. (Leader, when merging 04 with 08.) |
 | L18 | **A hidden tab keeps recording for up to 10 min**, then stops with a `hidden-tab` band. When it becomes visible again, recording restarts with a snapshot taken in idle time. | A quick look at another tab loses nothing; a tab left hidden for hours costs nothing (devil X9). |
 | L19 | **After any batch the recorder drops, it checkpoints at once** (at most once a minute). A dropped batch that held a too-big FullSnapshot **stops recording for this page load** instead. | Incremental events after a gap can't be trusted until the next snapshot (X1). A snapshot too big to send would be followed by another one just as big (X10). |
 | L20 | **A write key per recording** (03-L13): 16 random bytes, kept in memory, in sessionStorage and in each queued batch row, and sent as `X-SR-Write-Key`. | Leftover batches are sent by whichever tab starts next, so the key must travel with the batch. |
@@ -265,7 +265,7 @@ export const isSecretInput = (el: Element | null): boolean => {
   match case-insensitively, in the query and in the `#fragment`.
 - **CSRF values (no `blockSelector`, A8):** `route()` blanks the `content` of
   `meta[name*="csrf" i]` / `meta[name*="xsrf" i]` and the `value` of hidden inputs named like
-  `csrf`/`xsrf`. On a FullSnapshot it finds them with one small `querySelectorAll` on the live page
+  `csrf`/`xsrf`, **or whose name passes `isSecretKey`** (devil, 2026-11-11: a hidden `pw` or `jwt`). On a FullSnapshot it finds them with one small `querySelectorAll` on the live page
   and clears the matching serialized attributes, found through rrweb's mirror (R0 confirms the
   mirror hands back the serialized node). Added nodes are checked by tag and name. Later attribute
   and Input events for a known CSRF id are blanked too. `blockSelector` would make rrweb run
@@ -474,7 +474,15 @@ sizes, and the server's body limit is sized from them.
 **Slow-snapshot fallback (devil M10):** two runs over 50 ms in a row double the interval (up to 60
 min) and open a `snapshot-slow` band with the time in `detail`. Three runs under 25 ms halve it back
 towards the configured value and close the band. While the fallback is on, route-change checkpoints
-are skipped.
+are skipped, and **`checkpointMutations` scales with the interval** (architect, devil, 2026-11-11), so
+the trigger that fires most on a busy desk backs off too. Seeks on that desk get longer, behind
+the progress bar.
+
+**Snapshot budget (01 Acceptance → Performance).** A full snapshot is one synchronous pass and
+can't be split. A scheduled checkpoint or a resume snapshot is **not a long-frame strike**; it
+counts against 01's separate snapshot budget instead (ms per snapshot, at most one per N minutes
+at S2; the user sets the numbers at K3). A checkpoint starts only after 500 ms with no input
+event. Without this, a resume snapshot was strike 1, and one more slow frame paused recording again.
 
 ### Self-budget, pauses and hotspots (D8, D32)
 
@@ -493,10 +501,16 @@ stateDiagram-v2
 - **Cost per 5 s window:** `gateMs` (rrweb's mutation work, with the patch) + `ownMs` + recorder
   listener and pipeline time, all measured with `performance.now()`.
 - **Long-frame strike:** a `long-animation-frame` entry ≥ `longFrameMs` in which our bundle's
-  scripts took ≥ 10 ms. Whether LoAF attributes MutationObserver callbacks to our script is
+  scripts took ≥ 10 ms, other than a frame that ran a checkpoint or resume snapshot (Checkpoints). Whether LoAF attributes MutationObserver callbacks to our script is
   *unverified* (R0). Without LoAF (non-Chromium), only callback timing counts.
 - **Hotspot area:** above 70 % of the budget, the engine counts mutation events per area (the closest
   `[data-sr-grid]`, else a 4-level `tag#id.class` path). It costs nothing the rest of the time.
+  `data-sr-grid="<remote>/<grid>"` (08-L7) fills `sr:hotspot.remote` with the part before `/`
+  (architect, 2026-11-11), so a fix reaches the right team (D32).
+- **`sr:cost` once a minute** (devil, 2026-11-11): own ms, gate ms, snapshot ms, strikes and
+  whether paused, from the numbers the self-budget already keeps. It is the field data for 08 §6
+  stage 2's exit test; the server exports it as a metric (05). `budget.cpuPct` is calibrated at
+  K3 against Chrome's measured script time (02).
 - **Pause:** `sr:fidelity {reason:'pause-budget', start:true}`, then `stop()` (L6). Breadcrumbs,
   `sr:net` and state keep flowing. **Resume** closes the band and emits
   `sr:hotspot {area, mutationsPerSec, pausedMs}` (at `pagehide` if the tab closes while paused).
@@ -522,14 +536,16 @@ stateDiagram-v2
   `{ $root }` (03, 07).
 - **Actions** become `sr:state {op:'action', type, changes, removed}` at their `t` (L4), inserted
   with `mark`. They hold live references until serialized in idle time, before encode (L14).
-- **`no-state`:** 10 s after recording starts, a band opens for each remote in `sr:meta.remotes` with
-  no registered store of that `app`; it closes when one registers (03).
+- **`no-state`:** 10 s after a remote's entry has loaded (a `resource` performance entry for its
+  URL in `sr:meta.remotes`), a band opens if no store of that `app` has registered; it closes when
+  one registers (03). A remote whose tab was never opened gets no band (devil, 2026-11-11).
 
 ```ts
 // Sample — not final code. packages/recorder/src/state/serialize.ts. SECRET_WORDS and isSecretKey move
 // to @sr/protocol/secrets (03 T1, no imports), shared with the console formatter and the server (D43).
 const SECRET_WORDS = new Set(['password', 'secret', 'token', 'otp', 'credential', 'credentials',
-  'authorization', 'passphrase', 'pin', 'apikey', 'privatekey']);           // D18, widened
+  'authorization', 'passphrase', 'pin', 'apikey', 'privatekey',
+  'pw', 'pwd', 'passwd', 'jwt', 'cookie']);   // D18, widened; pw..cookie: user, 2026-11-11 (AMPS logon uses `pw`)
 const keyCache = new Map<string, boolean>();          // state keys repeat a lot, so this is ~free
 
 /** Word and camelCase boundaries: apiKey, api_key, APIKey, privateKey, pins match;
@@ -625,7 +641,9 @@ export const onResponse = async (b: QueuedBatch, res: Response | null, ctx: Pipe
   memory for this page load. `QuotaExceededError` drops the oldest batches with a `buffer-overflow`
   band and retries once. Without IndexedDB, the memory queue holds at most 5 MB, oldest dropped
   first with the same band.
-- **Caps:** 50 MB or 72 h; the oldest go first, with a `buffer-overflow` band. `stopUntilUtcMidnight`
+- **Caps:** sized at K3 (02: the S2 gzip per minute × 4 windows × the minutes to cover, target
+  120, bounded by half of `navigator.storage.estimate()`; 50 MB until then) or 72 h; the oldest go
+  first, with a `buffer-overflow` band. 01 Acceptance states the minutes a busy desk is covered. `stopUntilUtcMidnight`
   stops the engine and shows a `quota` band until UTC midnight.
 - **Leftovers:** batches whose owner was last seen over 2 min ago upload after the live queue is
   empty, at most 4 requests/s, with the write key from their row. A duplicate upload is harmless
@@ -660,6 +678,9 @@ addEventListener('pagehide', () => {
 
 ### Config and kill switch (D22)
 
+- **Own defaults** (03-L16, 2026-11-11): `config/defaults.ts` holds a default for every field the
+  recorder reads, typed from `z.input<typeof RecorderConfig>`, and is merged under the served
+  config. A newer recorder against an older server still works; an unknown field is ignored.
 - The config is re-fetched when `X-SR-Config-Version` changes, and when a tab becomes visible with
   a config older than 15 min. A failed re-fetch keeps the current config.
 - The server applies a ConfigMap change in about 2 min, or an `oc exec` override in about 20 s
@@ -683,7 +704,13 @@ entry is an absolute prefix (a font host). For each new URL:
 
 ### ReplayEngine (D25, `@sr/recorder-engine/replay`)
 
-The API follows 06's needs (06-C10–C12) and the review (A6, X1, X25, X28):
+The API follows 06's needs (06-C10–C12) and the review (A6, X1, X25, X28). **One `LoadChunk`
+shape** (architect, 2026-11-11): `{ meta: ChunkMeta; events }`, exported from
+`@sr/recorder-engine/replay`; 06 builds and reads it as is (`c.meta.seq`). 06 drops chunks that
+failed their check before `load`; the engine keeps its `unreadable` guard as a second line. The
+engine decodes `sr:*` events through `@sr/protocol/core` (03-L17) and skips tags it doesn't know.
+If `sr:meta.rrwebVersion` is newer than its own rrweb, `load` reports `newerRrweb: true`, and 06
+shows a note (03-L18):
 
 ```ts
 // Sample — not final code. packages/recorder-engine/src/replay/types.ts
@@ -771,6 +798,12 @@ export const offsetFor = (target: { pos: StreamPos } | { t: number }, st: Normal
 - **Canvas placeholder:** `canvas { background: <data: SVG "canvas not recorded">, repeating-linear-gradient(45deg, #d6d6d6 0 6px, #f2f2f2 6px 12px) !important; outline: 1px dashed #888 }`.
   `insertStyleRules` adds it with CSSOM `insertRule` into an empty `<style>` (`replay.js:14808`), which
   still needs `style-src 'unsafe-inline'` (D30).
+- **Exactness check (01 Acceptance → Exactness; devil, 2026-11-11).** The reference is a live
+  snapshot taken through a **test-only hook** in the engine (`__SR_TEST__.reference(pos)`, R2;
+  compiled out of production bundles by a build-time define). Before hashing, the live snapshot
+  gets the same normalisation as the replay: the L13 URL rewrite, rrweb's tag swaps (for example
+  `<script>` → `<noscript>`), the CSRF and secret blanks, and no scroll offsets, `:hover` or
+  running animations. 01 X2 owns only the spec.
 - **Golden compatibility:** every fixture in `packages/protocol/fixtures/session-v1-golden/` loads
   with zero rrweb warnings, and the DOM hash at every `sr:click` matches the stored one. This runs
   on every rrweb bump.
@@ -826,8 +859,8 @@ on clicks and inputs, the 400/403/429/503 bodies, the asset routes, `sr:net`, `r
   - 1,000 lines a second stay within the limit, with the drops in `dropped`.
   - After `maxPerRecording` lines, a `console-capped` note.
 - [ ] App requests behave as without the recorder: the same outcome, unhandled rejections still fire, bodies and headers untouched.
-- [ ] A CSRF `<meta>` and a hidden CSRF input replay with empty values, in the first snapshot and when added later.
-- [ ] The no-rrweb-import test passes; an rrweb internal error never reaches the app.
+- [ ] A CSRF `<meta>`, a hidden CSRF input and a hidden input named `pw` replay with empty values, in the first snapshot and when added later.
+- [ ] The no-rrweb-import test passes, and the built `sr-recorder.js` contains no zod (03-L17); an rrweb internal error never reaches the app.
 
 **Rate caps**
 - [ ] `bid` capped at 2/s: ≤ 2 states/s per cell, the exact value at every click and key press, no blank cell.
@@ -837,7 +870,9 @@ on clicks and inputs, the 400/403/429/503 bodies, the asset routes, `sr:net`, `r
 
 **Budget, checkpoints and bands**
 - [ ] Forced over budget: a `pause-budget` band, a `sr:hotspot` naming the grid, no pause → snapshot → pause loop.
-- [ ] Two slow checkpoints double the interval and open a `snapshot-slow` band.
+- [ ] Two slow checkpoints double the interval and `checkpointMutations`, and open a `snapshot-slow` band. A checkpoint or resume snapshot is never a long-frame strike, and starts only after 500 ms with no input.
+- [ ] `sr:cost` arrives once a minute with the self-budget's numbers.
+- [ ] A remote whose tab never opened gets no `no-state` band; one that loaded with no store does, 10 s after its entry loaded.
 - [ ] After 200,000 mutation records a checkpoint runs, even before 12 min.
 - [ ] Hidden tab: under 10 min, nothing is lost and there is no band. Past 10 min, a `hidden-tab` band opens and rrweb stops. Visible again, a snapshot taken in idle time closes the band.
 - [ ] A FullSnapshot too big to send stops recording for this page load with one `missing-batches` band (`detail: 'snapshot-too-big'`) and no retry loop.
@@ -847,7 +882,7 @@ on clicks and inputs, the 400/403/429/503 bodies, the asset routes, `sr:net`, `r
 - [ ] Every FullSnapshot (start, checkpoint, budget resume, hidden-tab restart, new recording) is followed by one `sr:state` snapshot per store, read through `getState()`.
 - [ ] A key in `meta.deny` shows as "not recorded" (`denied`). A 300 KB key shows as `capped`, with a `state-capped` note, while the store's other keys are recorded.
 - [ ] Two stores registered as `blotter/redux#1` are recorded as `blotter/redux#1` and `blotter/redux#1~2`.
-- [ ] `apiKey`, `api_key`, `privateKey`, `credentials`, `authorization`, `passphrase` and `pin` are masked; `company`, `author`, `expandedRows`, `pinned` and `keyboard` are kept.
+- [ ] `apiKey`, `api_key`, `privateKey`, `credentials`, `authorization`, `passphrase`, `pin`, `pw`, `pwd`, `passwd`, `jwt` and `cookie` are masked (an AMPS logon object `{ user, pw }` in state and in a `console.warn` shows `pw` masked); `company`, `author`, `expandedRows`, `pinned` and `keyboard` are kept.
 - [ ] A store whose state isn't a plain object is recorded as `{ $root }`.
 
 **Pipeline**
@@ -862,7 +897,8 @@ on clicks and inputs, the 400/403/429/503 bodies, the asset routes, `sr:net`, `r
 
 **Assets and replay**
 - [ ] Assets off: no asset requests. On: allow-listed images and fonts only, ≤ 2 MB, each uploaded once.
-- [ ] `ReplayEngine` handles empty input, a window without a full snapshot (error), chunks from two recordings (error), unknown `sr:*` tags, `destroy` during `load`, and a seek past the end.
+- [ ] The recorder accepts `batch-future.json`'s unknown config field and runs on a config with no `assetCache`, `console` or `budget` (its own defaults, 03-L16).
+- [ ] `ReplayEngine` handles empty input, a window without a full snapshot (error), chunks from two recordings (error), unknown `sr:*` tags, a recording stamped with a newer rrweb (`newerRrweb`), `destroy` during `load`, and a seek past the end.
 - [ ] `append` adds the next window without a rebuild flash; a seek across the join lands on the right frame.
 - [ ] After a gap or an unreadable chunk, the player shows "screen unknown" (and `onUnknown` fires) until the next FullSnapshot; no frame inside it looks complete.
 - [ ] URLs in `src`, `srcset`, `link`/`a`/SVG `href`, `poster`, `background`, inline styles and `<style>` text with `@import`, in the snapshot and in later mutations and style rules: the iframe requests nothing but `/assets/<sha256>`. SVG `#id` references still render.
@@ -870,9 +906,9 @@ on clicks and inputs, the 400/403/429/503 bodies, the asset routes, `sr:net`, `r
 
 ## Tasks
 
-- [ ] **R0 Recorder checks spike** — owns: `spike/recorder-checks/` — batch: B0, at approval — depends on: user approval, the rrweb pin (02-L5) — done when: findings are logged here for (1) seek by normalised position; (2) the D30 CSP: replay styling with `style-src 'unsafe-inline'`, and `frame-src 'none'` still allowing rrweb's about:blank iframe; (3) moved to 02 K2 (LoAF attribution); (4) `Bun.build` IIFE and worker outputs, and whether its source maps can carry `ignoreList`/`x_google_ignoreList` (D43; if not, R11's post-build step adds them); (5) moved to 02 K2 (the worst seek, A5); (6) `DecompressionStream` over the framed chunk response (A4); (7) appending a window with `addEvent`, with no flash (A6); (8) rrweb's mirror handing back the serialized node of a live element (CSRF blanking).
+- [ ] **R0 Recorder checks spike** — owns: `spike/recorder-checks/` — batch: B0, at approval — depends on: user approval, the rrweb pin (02-L5) — done when: findings are logged here for (1) seek by normalised position; (2) the D30 CSP: replay styling with `style-src 'unsafe-inline'`, and `frame-src 'none'` still allowing rrweb's about:blank iframe; (3) moved to 02 K2 (LoAF attribution); (4) `Bun.build` IIFE and worker outputs, and whether its source maps can carry `ignoreList`/`x_google_ignoreList` (D43; if not, R11's post-build step adds them); (5) moved to 02 K2 (the worst seek, A5); (6) `DecompressionStream` over the framed chunk response (A4); (7) appending a window with `addEvent`, with no flash (A6); (8) rrweb's mirror handing back the serialized node of a live element (CSRF blanking); (9) an rrweb Replayer in a fixed host over a flexlayout-react 0.11 tab survives a tab move, maximise and hide with no iframe reload, and its overlays stack as 06-L22 says (architect, 2026-11-11; a miss changes 06 before U4b).
 - [ ] **R1 Package scaffolds** — owns: `packages/recorder-engine/{package.json,tsconfig.json,test/setup.ts}`, `packages/recorder/{package.json,tsconfig.json,build.ts,test/setup.ts}` — batch: B1 — depends on: 03 T1 — done when: `bunx tsc --noEmit` and lint pass for both, and `bun test` runs the no-rrweb-import guard (happy-dom preload). Runs in one coder run with 07 PL1 (01 auditor pass).
-- [ ] **R2 Engine record core** — owns: `packages/recorder-engine/src/record/**`, `src/index.ts`, and a no-caps stub `src/rate-caps/index.ts` that R9 replaces — batch: B2 — depends on: R1 — done when: unit tests (`record` mocked) cover insert order, the 3 s hold-back and `take(true)`, Meta and CSRF routing, the fetch/XHR wrapper (fail open, same outcome, ignored endpoint), masking (including the toggle), token stripping, `gateActive` detection, the release hooks and checkpoint timing; type-check and lint pass.
+- [ ] **R2 Engine record core** — owns: `packages/recorder-engine/src/record/**` (including the test-only `__SR_TEST__.reference` hook, compiled out of production), `src/index.ts`, and a no-caps stub `src/rate-caps/index.ts` that R9 replaces — batch: B2 — depends on: R1 — done when: unit tests (`record` mocked) cover insert order, the 3 s hold-back and `take(true)`, Meta and CSRF routing, the fetch/XHR wrapper (fail open, same outcome, ignored endpoint), masking (including the toggle), token stripping, `gateActive` detection, the release hooks and checkpoint timing; type-check and lint pass.
 - [ ] **R3 ReplayEngine core** — owns: `packages/recorder-engine/src/replay/{engine,normalise,gaps,rewrite,placeholders,types}.ts` — batch: B2 — depends on: R1, R0, 03 T2 — done when: unit tests cover normalise and offsets, `append`, gaps and "screen unknown", the window-start rule, muted markers during seek, `firstFrame`, the URL rewrite with unknown URLs made inert (every attribute kind, mutations, style rules, `@import`, `#id` kept), and the error cases; type-check and lint pass.
 - [ ] **R4 Loader, sessions, config** — owns: `packages/recorder/src/{loader,session,config}/**` — batch: B3 — depends on: R2 — done when: unit tests cover gating (core never requested when not enabled), the queue left unadopted by the loader, kill only on an explicit answer, a failed fetch leaving it off but not killed, the user-id path and `identify()`, the session, duplicate and bfcache rules (marker set again), the write key, version re-fetch and the kill switch.
 - [ ] **R5 Capture** (breadcrumbs, flush at action, nav, errors, console, hidden tab, popout) — owns: `packages/recorder/src/capture/**` — batch: B3 — depends on: R4 — done when: unit tests cover listener order, event-time stamping and the click-after-release rule, masked labels and values, dedupe and rate limits, the 10-min hidden-tab rule, inert patches, and console capture (D43: lazy wrapping of the enabled levels; the order per call, with the limit before formatting; the bounded formatter with `isSecretKey` and `%` handling; `maskCutToken`; stacks and own-frame dropping; `same`, `dropped` and the per-recording cap; pass-through while paused). Console lines are scrubbed by the pipeline (R7a).
@@ -921,3 +957,4 @@ All answered by the user on 2026-11-10 (01, Q25–Q28):
 - 2026-11-10 — Console capture (01 D43): the console wrapper rules in Capture, an Acceptance item, R5 covers it, R11 adds `x_google_ignoreList` to the source maps, and a Risks row. MVP2 adds the DOM probe in `src/dom-probe/` (09 AN5).
 - 2026-11-10 — Console and analytics review merged (leader). Console rules rewritten: lazy wrapping, the limit before formatting, a bounded formatter with `isSecretKey` and `%` handling, `maskCutToken`, stacks, `same` and `dropped`, a per-recording cap, pass-through while paused, wrapper time in the budget (devil B1, B2; architect 4, 5). The scrubber masks URL userinfo. `isSecretKey` moves to `@sr/protocol/secrets`. R0 checks source-map `ignoreList` support. R5, R6, R7a, R8 and R11 updated; new Risks rows.
 - 2026-11-11 — R6 ignores bridge messages whose `kind` isn't `redux`, so a v1.1 build plugin with AMPS capture (10) is safe next to a pilot recorder (leader, from the plan 10 architect).
+- 2026-11-11 — Overall architect and devil review (01 → Overall review resolution): bundles move to `/session-recorder/<version>/` (no `/sr` prefix clash); `pw`, `pwd`, `passwd`, `jwt`, `cookie` join the secret words and hidden inputs named like secrets are blanked (user); the slow-snapshot fallback also scales `checkpointMutations`, and checkpoint or resume snapshots count against a separate snapshot budget, not as strikes; `sr:cost` once a minute; hotspot `remote` from `data-sr-grid`; `no-state` only after a remote's entry loaded; queue cap sized at K3 for 4 windows; the recorder's own config defaults (03-L16); one `LoadChunk` shape and a `newerRrweb` note; the exactness check's test-only hook (R2) and normalisation; R0 check 9 (flexlayout stage host).

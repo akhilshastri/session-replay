@@ -22,7 +22,7 @@ Inherits D1, D3, D4, D5, D11, D18, D19, D20, D22, D23, D30, D32, D34, D36, D37, 
 | L4 | The **server image** goes to the cluster registry. Every region runs **the same image digest**; only config differs. | One build to test; region differences are data, not code. |
 | L5 | **Rollout by allow-list stages** (D22): a few users, then the desk, then the region. The kill switch is the first response; removing the script tag is the last resort. | Rollback without a host redeploy: about 20 s with the `oc exec` override, about 2 min through the ConfigMap (§6). |
 | L6 | `examples/` is **derived from the 07 fixture apps** (PL5–PL6) and checked by a test (each sample parses, and the fixture builds pass the plugin's outcome check). | Copied config samples rot; checked ones don't. |
-| L7 | Mark grids with **`data-sr-grid` on the grid's own container** inside the tab component, and give capped columns an **explicit `colId`**. | flexlayout owns and moves its tab wrappers. AG Grid's `colId` defaults to `field`, so a renamed field would silently drop a cap. |
+| L7 | Mark grids with **`data-sr-grid` on the grid's own container** inside the tab component, and give capped columns an **explicit `colId`**. The value is **`<remote>/<grid>`** (architect, 2026-11-11): the recorder splits on the first `/`; the part before fills the hotspot's `remote` (D32), the part after is the grid id that rate caps and 09's click facts use. A value without `/` is a grid id with no remote. | flexlayout owns and moves its tab wrappers. AG Grid's `colId` defaults to `field`, so a renamed field would silently drop a cap. |
 
 ## How-to
 
@@ -66,12 +66,12 @@ In the real workspace (npm or pnpm on Node 22), consumers point the scope at the
 ### 2. Host shell setup
 
 **2a. Load the recorder.** Copy the package's `dist/iife/` folder into the host's build output as
-`sr-recorder/<version>/` (see the webpack config in §3), then add one tag to the shell's HTML
+`session-recorder/<version>/` (see the webpack config in §3; never a name starting with `sr`, so a `/sr` prefix rule can't catch it, 04-L17), then add one tag to the shell's HTML
 template. Each remote needs nothing: they all share the host's DOM (D3).
 
 ```html
 <!-- Sample — not final code. public/index.html (HtmlWebpackPlugin template) -->
-<script src="/sr-recorder/<%= srVersion %>/sr-loader.js" data-app="trading-shell" data-endpoint="/sr" defer></script>
+<script src="/session-recorder/<%= srVersion %>/sr-loader.js" data-app="trading-shell" data-endpoint="/sr" defer></script>
 ```
 
 - The loader fetches `sr-recorder.js` (and `sr-worker.js`, if used) from **its own folder**, and
@@ -201,7 +201,7 @@ module.exports = {
     }),
     new CopyWebpackPlugin({ patterns: [{                 // the whole folder: loader, recorder, worker
       from: path.join(path.dirname(require.resolve('@sr/recorder/package.json')), 'dist/iife'),
-      to: `sr-recorder/${srVersion}/` }] }),
+      to: `session-recorder/${srVersion}/` }] }),
     new HtmlWebpackPlugin({ template: './public/index.html', templateParameters: { srVersion } }),
   ],
 };
@@ -274,7 +274,7 @@ const columnDefs = [
 
 // data-sr-grid goes on the grid's own container, not on flexlayout's tab wrapper (L7).
 export const PositionsTab = ({ node }: { node: TabNode }) => (
-  <div data-sr-grid="positions" style={{ height: '100%' }}>
+  <div data-sr-grid="blotter/positions" style={{ height: '100%' }}>   {/* <remote>/<grid> (L7) */}
     <AgGridReact columnDefs={columnDefs} getRowId={(p) => p.data.id} />
   </div>
 );
@@ -283,7 +283,7 @@ export const factory = (node: TabNode) =>
 ```
 
 **How a cap is found (D36):** a changing cell `.ag-cell[col-id="bid"]` → its nearest
-`[data-sr-grid]` ancestor (`positions`) → config `rateCaps.positions.bid` → at most that many
+`[data-sr-grid]` ancestor (`blotter/positions`, grid id `positions`) → config `rateCaps.positions.bid` → at most that many
 states per second, plus a flush at every user action.
 
 - Grid ids: lowercase letters, digits and `-`; stable across releases. The same grid component in
@@ -360,11 +360,12 @@ refuses a changed file with the same `version`. Running tabs see the new version
 
 ```jsonc
 // Sample — not final code. NAM, pilot week 1, in 05's format: defaults + per-app overrides.
+// cpuPct stays 3 until 02 K3 calibrates it. Budgets and caps are per app in v1, not per desk.
 { "v": 1, "version": "2026-11-17.1", "killSwitch": false,     // top-level: every app off at once
   "defaults": { "checkpointMinutes": 12, "checkpointMutations": 200000, "pipeline": "main",
                 "retentionClass": "std",
                 "budget": { "cpuPct": 3, "longFrameMs": 50, "resumeAfterMs": 10000 },
-                "assetCache": { "enabled": false, "allow": ["/assets/", "/static/"] } },
+                "assetCache": { "enabled": true, "allow": ["/assets/", "/static/"] } },   // on for the pilot; paths from 02 K0 (user, 2026-11-11)
   "apps": {
     "trading-shell": { "allowAll": false, "allowUsers": ["u123", "u456", "u789"],   // D22
                        "rateCaps": {} } },                     // no caps to start (below)
@@ -399,7 +400,11 @@ recorded, with the same region config, allow-list, kill switch and 30-day retent
 | 3 Region | other desks in the region, in steps | as stage 2 | as above |
 | 4 Next region | repeat 0–3 in APAC, then EMEA | — | per region |
 
-The DPIA and the staff notice must be done before stage 1 (D19).
+The DPIA and the staff notice must be done before stage 1 (D19). Also before stage 1: the off-PVC backup target is confirmed and the storage class and backup bucket are encrypted at rest (05 Backups; user, 2026-11-11). If the DPIA asks for real viewer names, switch on 05 S16's `oauth-proxy` component (D38).
+
+**Stage 2's field data:** `sr_recorder_cost_ratio{app}` (from `sr:cost`, 05 Observability) against the 01 budget, and the K3 calibration of `cpuPct`.
+
+**Deploy order for every upgrade** (03-L16; architect, devil, 2026-11-11): (1) the server and replay UI in **every** region; (2) then the host builds with the new recorder; (3) then the remotes with the new plugin. An older replayer must never meet a newer recording. Readers are tolerant anyway, and the UI shows a "Newer recorder" note if one slips through.
 
 **Kill switch (D22).** Two routes. Both stop recording without a host redeploy.
 
@@ -436,7 +441,7 @@ oc -n sr-nam exec sr-server-0 -- bun apps/server/src/cli.ts status    # shows th
 **Legal hold.** Add `{ "sessionId": "…", "ticket": "…", "since": "yyyy-mm-dd" }` to `legalHolds`
 in the region's ConfigMap and bump `version`. Retention then copies the session to `holds/`,
 verified, before its day files are deleted (05). Remove the entry to lift the hold. Add it well
-before the session's day files reach 30 days: retention runs daily at 01:00 UTC.
+before the session's day files reach 30 days: retention runs right after each day's seal, at the region's own time (05-L6).
 
 **Erasure** is a written runbook, not a tool: follow **05 → "Erasure runbook"** (a dry run, then
 one CLI step per key or per day file, each with `oc exec` and each logged). There is no erase API
@@ -448,8 +453,10 @@ One namespace per region, same image digest (L4). The YAML is in `05-server.md`
 (`deploy/openshift/base` plus `overlays/{nam,apac,emea}`).
 
 1. Create the namespace `sr-<region>` and give it pull access to the image registry.
-2. In the overlay, set the host, the support-network CIDRs, a **ReadWriteOnce, block-backed**
-   storage class (never NFS or CephFS: SQLite's WAL breaks there), `SR_REGION` and the image digest.
+2. In the overlay, set the host, the support-network CIDRs, a **ReadWriteOnce, block-backed,
+   encrypted** storage class (never NFS or CephFS: SQLite's WAL breaks there), `SR_REGION`, the image
+   digest and `SR_DAY_CLOSE_GRACE_MIN` (30 in NAM and EMEA; about 900 in APAC, so the seal runs near
+   23:00 Singapore time, 05-L6).
 3. Create `sr-server-secrets` (`SR_MASTER_KEY`, `SR_COOKIE_KEY`, `SR_SUBJECT_KEY`) from Vault or
    an OpenShift Secret. Never from the repo.
 4. Put the region's config (§5) in `sr-recorder-config`, with `allowUsers: []` to start.
@@ -470,9 +477,10 @@ One namespace per region, same image digest (L4). The YAML is in `05-server.md`
 ### 8. Verification checklist (after integrating)
 
 - [ ] **Recording appears:** an allow-listed user loads the app, clicks for a minute, and the session shows in the region's replay UI within a minute. Replay matches the screen.
-- [ ] **Secrets masked (D18):** use made-up test values only. Type into a password field (then click "show password" and type more), and into a one-time-code field. Put a JWT and a `Basic …` value in the page text. Add `?token=abc` and `#access_token=abc` to a URL, `?api_key=abc` to an image URL, and open a login-callback URL with both `?code=` and `?state=`. Give a Redux slice keys like `apiKey`, `credentials` and `pin`. Then search the day file **inside the pod** with 05's helper: `oc exec sr-server-0 -- bun apps/server/test/helpers/grep-day.ts /data/<yyyymmdd>/std.db <value>…`. Never copy a day file out of the cluster. None of the values is there.
+- [ ] **Secrets masked (D18):** use made-up test values only. Type into a password field (then click "show password" and type more), and into a one-time-code field. Put a JWT and a `Basic …` value in the page text. Add `?token=abc` and `#access_token=abc` to a URL, `?api_key=abc` to an image URL, and open a login-callback URL with both `?code=` and `?state=`. Give a Redux slice keys like `apiKey`, `credentials` and `pin`, and an AMPS logon object `{ user, pw }`; log that object once with `console.warn`; add a hidden input named `pw`. Then search the day file **inside the pod** with 05's helper: `oc exec sr-server-0 -- bun apps/server/test/helpers/grep-day.ts /data/<yyyymmdd>/std.db <value>…`. Never copy a day file out of the cluster. None of the values is there.
 - [ ] **Everything else replays exactly (D18, D35):** normal inputs replay as typed; `?state=filled` and `?key=AAPL` stay in links and the action list; a generated basket name such as `AAPL1762743000000` is unchanged.
 - [ ] **Redux captured:** dispatch an action through a thunk in each remote. It shows in the action list and the state panel at the right moment, in the host and in each remote. A remote without the plugin shows `no-state`.
+- [ ] **Fonts and icons:** with the asset cache on (§5), the app's webfonts, icons and CSS backgrounds replay; the allow-list matches the real build's asset paths (02 K0).
 - [ ] **Not enabled = idle:** a user not in `allowUsers` loads only `/sr/config` (DevTools Network) and no recorder listeners.
 - [ ] **Rate-cap legend:** with a cap on `positions.bid`, the replay legend says "positions grid: bid recorded at 2/s", and a click on a ticking row replays exactly.
 - [ ] **Hotspots:** on a forced busy screen (or the P1 stress page in the same host), a pause shows a band and a row on the Hotspots page for that day, linked to the session.
@@ -738,7 +746,7 @@ Still open, before B5 (01 Q36, Q37, Q40):
 1. Which internal npm registry and package scope (keep `@sr` or rename), and which image registry?
 2. Storage classes, snapshot classes and object storage per cluster (05).
 3. Which region runs the pilot, and which desk and 2–3 users go first?
-4. The real versions of React, Redux, AG Grid, flexlayout-react, webpack and Vite (read from the workspace in the dry run).
+4. The real versions of React, Redux, AG Grid, flexlayout-react, webpack and Vite: now read in B0 by 02 K0 (user, 2026-11-11); the dry run re-checks webpack and Vite.
 
 After the B5 spike (01 Q43): log AG Grid data like Redux state, and which way (§13, I6)?
 
@@ -752,3 +760,4 @@ After the B5 spike (01 Q43): log AG Grid data like Redux state, and which way (�
 - 2026-11-10 — Auditor pass (01): I3's publish dry run moves to B4 as a leader command; B5 adds only the registry name.
 - 2026-11-10 — Console levels (01 D43): how the central team turns on more levels per region, and a troubleshooting row for the DevTools call site. MVP2 tab facts come from the `$dom` probe (09), not the host snippet.
 - 2026-11-10 — Console and analytics review merged (leader): console capture follows the record/replay rules (user); the DPIA and staff notice name it before stage 1.
+- 2026-11-11 — Overall architect and devil review (01 → Overall review resolution): `data-sr-grid="<remote>/<grid>"` (L7); bundles move to `session-recorder/<version>/`; the pilot config turns the asset cache on (user) and §8 checks fonts and icons; deploy order (servers and UI everywhere first); stage-1 preconditions (off-PVC backup, encrypted storage) and the `oauth-proxy` component if the DPIA asks (user); stage 2 measures `sr_recorder_cost_ratio`; per-region seal grace; `pw` cases in §8; real versions come from K0 in B0.
