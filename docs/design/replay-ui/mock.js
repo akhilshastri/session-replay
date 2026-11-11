@@ -142,6 +142,41 @@
     if (pop) pop.hidden = !pop.hidden;
   };
 
+  // ── Border drawer (Sessions) ─────────────────────────────────────────────
+  // Clicking the strip opens or closes the drawer, like a flexlayout border tab; [Show Sessions]
+  // opens it. Page CSS sets each variant's starting state; a click overrides it inline until the
+  // next variant switch (resetBorders).
+  const borderPanel = (border) => {
+    const p = border && border.nextElementSibling;
+    return p && p.classList.contains('fl-border-panel') ? p : null;
+  };
+  const isBorderOpen = (border) => {
+    const p = borderPanel(border);
+    return !!p && getComputedStyle(p).display !== 'none';
+  };
+  const syncBorderTab = (border) => {
+    const tab = border.querySelector('.fl-border-tab');
+    if (tab) tab.setAttribute('aria-selected', String(isBorderOpen(border)));
+  };
+  const setBorder = (border, open) => {
+    const p = borderPanel(border);
+    if (!p) return;
+    p.style.display = open ? 'flex' : 'none';
+    doc.querySelectorAll('.show-sessions').forEach((b) => { b.style.display = open ? 'none' : ''; });
+    syncBorderTab(border);
+  };
+  const resetBorders = () => {
+    doc.querySelectorAll('.fl-border-panel').forEach((p) => { p.style.display = ''; });
+    doc.querySelectorAll('.show-sessions').forEach((b) => { b.style.display = ''; });
+    doc.querySelectorAll('.fl-border').forEach(syncBorderTab);
+  };
+  const onBorderClick = (e) => {
+    const tab = e.target.closest('.fl-border-tab');
+    const show = e.target.closest('.show-sessions');
+    const border = tab ? tab.closest('.fl-border') : show ? doc.querySelector('.fl-border') : null;
+    if (border) setBorder(border, show ? true : !isBorderOpen(border));
+  };
+
   // ── MOCK variant pill ────────────────────────────────────────────────────
   const setupVariants = () => {
     const raw = doc.body.dataset.variants;
@@ -158,6 +193,7 @@
     const select = (id) => {
       const v = list.find((x) => x.id === id) || list[0];
       doc.body.dataset.variant = v.id;
+      resetBorders(); // the variant's page CSS decides the drawer again
       btn.textContent = `MOCK · ${v.label} ▾`;
       menu.querySelectorAll('button').forEach((b) => b.setAttribute('aria-current', String(b.dataset.id === v.id)));
       history.replaceState(null, '', `#${v.id}`); // a link like 03-replay-playing.html#hover opens that variant
@@ -195,6 +231,8 @@
     setupVariants();
     setupFit();
     doc.addEventListener('click', onClick);
+    doc.addEventListener('click', onBorderClick);
+    resetBorders(); // pages without variants: sync the strip's aria-selected with the drawer
     doc.addEventListener('pointerdown', (e) => { // the tabset you touch becomes the active one
       const set = e.target.closest('[data-tabset]');
       if (set) doc.querySelectorAll('[data-tabset]').forEach((s) => s.classList.toggle('is-active', s === set));
@@ -203,6 +241,8 @@
       if (e.key === 'Escape') closePops();
       const tab = e.target.closest && e.target.closest('.fl-tab[data-tab]');
       if (tab && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); selectTab(tab); }
+      const strip = e.target.closest && e.target.closest('.fl-border-tab');
+      if (strip && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); strip.click(); }
     });
     // "Follow the play head": show the current row in the middle of its list.
     doc.querySelectorAll('.pn-scroll').forEach((box) => {
