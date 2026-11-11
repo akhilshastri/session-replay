@@ -425,43 +425,56 @@ local L-rows. A decision that affects more than one sub-plan is made here.
 **Scheduling by dependencies** (architect A15). Batches group the work; they are not barriers.
 A task starts as soon as its `depends on:` tasks are done and one of the **3 agent slots** is free
 (qa counts as an agent). When two tasks are ready, the **server lane goes first**: it is the
-critical path. Two hard gates only:
-- **Gate 1, end of B1:** contracts and scaffolds reviewed; root `typecheck`, `lint` and `test` green; **and K3's S2 headline runs have passed 02's go / no-go rule (02-L9)**, so B2 builds on real numbers.
-- **Gate 2, the commit gate after B4:** full e2e once, then the qa `gate` browser check.
+critical path. Two hard gates and one go / no-go:
+- **Gate 1, end of B1:** contracts and scaffolds reviewed; root `typecheck`, `lint` and `test` green. It releases B2, except S4 and R2 (user, 2026-11-11, auditor).
+- **Go / no-go (02-L9):** K3's S2 headline runs pass 02's rule. S4 waits for it, because its threading and body limit follow the bytes per minute. R2 waits too, because a result worse than 2× sends D16 back to the user and may change what the record core keeps. With the result, the leader asks the user **one round** of questions on the numbers: Q19 (defer R9?), Q45 (snapshot budget), Q46 (outage minutes), and K4's RTK result if it is in. R8, R9 and R11 wait for that round.
+- **Gate 2, the commit gate after B4:** K5, then the full e2e once, back-to-back in one quiet window; then the qa `gate` browser check.
 
-Gate 1 waits for K3's S2 headline runs only (a few hours; 02 K3), and S4's threading follows their
-bytes per minute. Beyond that, five tasks wait for P1's full numbers (K3): R8 (budget), R9 (rate caps), R11 (worker mode),
-S13 (load test) and S14 (sizing). K3 also decides whether R9 is deferred and whether R11 builds the
-worker (Q19, D11). Everything else runs while the 8-hour soak is still going.
+Gate 1 doesn't wait for P1: the work it releases depends least on the numbers. If the go / no-go
+comes out worse than 2×, the leader stops B2 and re-plans with the user. Beyond the go / no-go,
+only S13 (load test) and S14 (sizing) wait for all of K3: the S3 peak minute and the PVC size come
+from the sweeps.
+
+**Performance runs need a quiet machine** (user, 2026-11-11). K3 and K5 run on this machine only
+while no agent, build, test or browser runs: the leader lets running agents finish and starts none
+until the run ends. The S2 headline runs take a quiet evening as soon as K0's profile is in and
+K2a is done; K2b runs after them, never during them; the sweeps and the 8-hour soak run overnight.
 
 ```mermaid
 flowchart LR
-  A[User approves the plan] --> B0["B0 spikes<br/>K0 real-app profile · K2 · K4 · R0 in parallel · K1 right after X1<br/>K3 S2 headline runs, then sweeps + soak in the background"]
-  A --> B1["B1 contracts + scaffolds<br/>X1 first · T1 → T2 · R1+PL1, S1, U1"]
-  B1 --> G1{{Gate 1}}
-  B0 -. S2 headline numbers .-> G1
-  G1 --> B2["B2 core<br/>server S2–S4, S6 first · R2, R3 · U2, U3a, U3b, U4a · PL2–PL4"]
-  B2 --> B3["B3 features<br/>S7, S8, S5a, S5b, S9 · R4–R8 · U4b–U8, U11 · walking skeleton · X2 specs"]
-  B0 -. P1 numbers .-> B3
-  B3 --> B4["B4 cross-cutting<br/>R9–R11 · S11–S14 · U9, U10 · PL5, PL6 · I1–I3 · K5"]
-  B4 --> G2{{Gate 2: commit gate}}
-  G2 --> B5["B5 real workspace<br/>I4 → I6 · S15, S16 · I5 pilot · S10 after Gate 2"]
+  A[User approves the plan] --> B0["B0 spikes<br/>K0 snippet · K2a · then K4, R0, K1<br/>K3 headline runs in a quiet evening · K2b · sweeps + soak overnight"]
+  A --> B1["B1 contracts + scaffolds<br/>X1, T1 first · then S1, R1+PL1, T2, U1"]
+  B1 --> G1{{Gate 1: review + checks}}
+  G1 --> B2["B2 core<br/>server S2–S3b, then S4 → S6 · R3, then R2 · U2, U3a, U3b, U4a · PL2–PL4"]
+  B0 -. S2 headline runs .-> GO{{Go / no-go + one user round}}
+  GO -. S4 and R2 .-> B2
+  B2 --> B3["B3 features<br/>S7, S8, S5a, S5b, S9 · R4 → R7a → R7b first, then R5, R6, R8 · U4b–U8, U11 · walking skeleton · qa run 1"]
+  GO -. R8 .-> B3
+  B3 --> B4["B4 cross-cutting<br/>R9–R11 · S11–S14 · U9, U10 · PL5, PL6 · I1–I3 · qa run 2"]
+  B0 -. full K3 numbers .-> B4
+  B4 --> G2{{Gate 2: K5 + full e2e in one quiet window, then the qa gate check}}
+  G2 --> B5["B5 real workspace<br/>I4 → I6 · S15 · I5 pilot · S10 and S16 right after Gate 2"]
 ```
 
 | Group | Tasks, in dependency order | Also waits for | Review |
 |---|---|---|---|
-| **B0** | K0 (real-app profile, the user with a coder-written snippet) first · K2 (P1 harness, with the startup and seek modes and R0's checks 3 and 5; tuned to K0), K4 (P1b MF spike, plus one real remote and an RTK fixture) and R0 (recorder checks, incl. check 9: the flexlayout stage host) in parallel · K1 (gate patch) right after X1 · then K3: the S2 headline runs first (they gate Gate 1), then the sweeps and the 8 h soak in the background | approval; K1 also X1 (both edit the root `package.json` and `.gitignore`) | results written back into 01, 02 and 04 from K2's `summarize.ts`; D11, the D36 defaults, Q19, and the R9, R11 and S13 calls |
-| **B1** | X1 (root scaffold) first, with 03 T1 alongside · after T1: 04 R1 + 07 PL1 (one coder run), 05 S1, 03 T2 · after X1: 06 U1 | approval; Gate 1 also waits for K3's S2 headline runs (02-L9) | **Gate 1**; one batched reviewer run on **opus**: it includes the T1 contracts, which are additive-only from then on |
-| **B2** | 05: S2 → S3a → S3b → S4 → S6 · 04: R2 ∥ R3 · 06: U2 → U3a → U3b, with U4a as filler once U1 and T2 are done · 07: PL2 ∥ (PL3 → PL4) | Gate 1; R3 also R0 | one reviewer run **per lane group** (S2–S6, R2–R3, U2–U4a, PL2–PL4), while that lane builds its next slice |
-| **B3** | 05: S7 → S8 → S5a → S5b → S9 (architect, 2026-11-11: the query API and `/sr/config` first) · 04: R4 → (R5 ∥ R6 ∥ R7a) → R7b → R8 · 06: U4b → (U6a ∥ U7 ∥ U8 ∥ U11) → (U5 ∥ U6b), as slots free up (the 3-agent limit is shared across lanes) · qa: X2 gate-2 specs (`specs` mode) when a slot is free · **walking skeleton** once R7b and S7 land: one targeted check (the leader runs it) where the unbundled recorder on a static page posts to S4, S7 reads it back and R3 replays it; T2's `session-v1-golden` is then regenerated from that real recording | R8: K3 | one reviewer run per lane group, as in B2 |
-| **B4** | 04: R9 ∥ R10 ∥ R11 (R9 only if not deferred at K3; R10 + R11 in one coder run if K3 keeps the main-thread pipeline) · 05: S11 → S12 → S13 → S14 · 06: U9 → U10 · 07: PL5 → PL6 (one run if K4 was clean) · 08: I1 → I2, and I3 (a leader command) · 02: K5 (P1 on the built bundles, recorded into `apps/server`) · qa: PL7 and the browser contract specs | R9, R11, S13, S14: K3; R9: K1; K5: R11 and 05 S7, S8 | **Gate 2: commit gate**; the busy-session items use K5's kept day files |
-| **B5** | 08: I4 → I6 (grid data log spike, post-MVP TODO) · 05: S15, S16 (`oauth-proxy` component, ready if needed) · 08: I5 (pilot, user-led); I3 adds only the registry name · 05 S10 (crypto-shredding) after Gate 2, not needed for the pilot | the B5 open questions | pilot "done when" |
+| **B0** | K0's snippet (one short coder run; the user runs it in the real app) first · K2a (the headline-run harness) when that run ends · then K4 (P1b MF spike, plus one real remote and an RTK fixture), R0 (recorder checks, incl. check 9: the flexlayout stage host) and K1 (gate patch), after B1's first coder runs · K3: the S2 headline runs in a quiet evening once K0's profile is in (they feed the go / no-go), then K2b (startup and seek modes, console load, cap wiring, R0's checks 3 and 5), then the sweeps and the 8 h soak overnight | approval; K1 also X1 (both edit the root `package.json` and `.gitignore`) | results written back into 01, 02 and 04 from K2's `summarize.ts`; the go / no-go and its user round (D11, Q19, Q45, Q46); the D36 defaults and the S13, S14 numbers after the sweeps |
+| **B1** | X1 (root scaffold) and 03 T1 first · after T1: 05 S1, 04 R1 + 07 PL1 (one coder run), 03 T2 · after X1: 06 U1 | approval | **Gate 1**; one batched reviewer run on **opus**: it includes the T1 contracts, which are additive-only from then on |
+| **B2** | 05: S2 → S3a → S3b → S4 → S6 · 04: R3; R2 after the go / no-go · 06: U2 → U3a → U3b, with U4a as filler once U1 and T2 are done · 07: PL2 ∥ (PL3 → PL4) | Gate 1; S4 and R2 also the go / no-go; R3 also R0; PL4 also K4 | one reviewer run **per lane group** (S2–S6, R2–R3, U2–U4a, PL2–PL4), while that lane builds its next slice |
+| **B3** | 05: S7 → S8 → S5a → S5b → S9 (architect, 2026-11-11: the query API and `/sr/config` first) · 04: R4 → R7a → R7b first (the walking skeleton needs them), then R5 ∥ R6, then R8 · 06: U4b → (U6a ∥ U7 ∥ U8 ∥ U11) → (U5 ∥ U6b), as slots free up (the 3-agent limit is shared across lanes) · qa: X2's first run (`specs` mode), timed to end when R7b and S8 land · **walking skeleton** once R7b and S8 land: one targeted check (the leader runs X2's skeleton page) where the recorder, loaded from source on a static page through the loader, fetches `/sr/config` from S8, posts to S4, S7 reads it back and R3 replays it; the leader then regenerates T2's `session-v1-golden` from that real recording with X2's script and runs root `bun test` once | R8: the go / no-go round | one reviewer run per lane group, as in B2 |
+| **B4** | 04: R9 ∥ R10 ∥ R11 (R9 only if not deferred at the go / no-go; R10 + R11 in one coder run if the main-thread pipeline stays, D11) · 05: S11 → S12 → S13 ∥ S14 · 06: U9 → U10 · 07: PL5 → PL6 (one run if K4 was clean) · 08: I3 (a leader command) and I1, then I2 · qa: X2's second run (04's browser contract specs, U10's spec, PL7) · 02: K5 (P1 on the built bundles, recorded into `apps/server`), last, in the Gate 2 quiet window | R9, R11: the go / no-go round; R9: K1; S13, S14: all of K3; K5: R11 and 05 S7, S8 | **Gate 2: commit gate**; the busy-session items use K5's kept day files |
+| **B5** | 08: I4 → I6 (grid data log spike, post-MVP TODO) · 05: S15 · 08: I5 (pilot, user-led); I3 adds only the registry name · 05: S10 (crypto-shredding, not needed for the pilot) and S16 (`oauth-proxy` component, ready if needed) right after Gate 2: neither waits for the B5 answers, and one reviewer run covers both | the B5 open questions (S15, I4, I5) | pilot "done when" |
 
 **Filler work.** U9, R10, PL5 and PL6 may start as soon as their `depends on:` lines are met, in
-B2 or B3, to keep slots busy while R8, R9 and R11 wait for K3.
+B2 or B3, to keep slots busy while S4 and R2 wait for the go / no-go and R8, R9 and R11 for its
+user round.
 
-**Lean handoff at approval** (auditor): K0 (with the user), X1, T1 and K2 start. When X1 lands: K1, then U1. When T1
-lands: S1, R1 + PL1, T2. K4 and R0 take the next free slots.
+**Lean handoff at approval** (auditor, 2026-11-10 and 2026-11-11). At approval the leader picks the
+rrweb pin (02-L5), asks the user for the AG Grid, React, flexlayout-react and Redux versions (K2a
+installs them first; K0 confirms them) and agrees a K0 date. Three slots: K0's snippet, X1 and T1.
+K2a takes the snippet's slot when it ends. When T1 lands: S1, R1 + PL1, T2; when X1 lands: U1
+(server first). K4, R0 and K1 take the next free slots. Then the Gate 1 review (opus), and B2 opens
+with at most 3 agents, the reviewer included.
 
 ### Rules for parallel agents
 
@@ -516,12 +529,19 @@ P4b (assets) → 04 R10 + 05 S11 + 06 U10; P5 → 07.
   `Dockerfile*`, `LICENSE`), `playwright.config.ts` (`testDir: 'e2e'`), `test/preload-dom.ts` (the shared happy-dom
   preload) — batch: **B1, first** — depends on: user approval — done when: `bun install`,
   `bun run typecheck`, `bun run lint`, `bun test` and `bun run check:agents` pass at the root.
-- [ ] **X2 Gate-2 e2e specs** (qa, `specs` mode) — owns: `e2e/**`: a host page that loads the built
-  recorder bundles against `apps/server`, and the specs for the Acceptance items above that need a
-  browser — batch: B3 when a slot is free; first run at Gate 2 — depends on: this Acceptance list;
-  03 T2 fixtures — done when: the specs compile and are tagged by area, with a small `@smoke` set;
-  the busy-session seek and Hotspots items read K5's kept day files (02 K5).
   `spike/*` is left out of typecheck and lint.
+- [ ] **X2 Gate-2 e2e specs** (qa, `specs` mode, **two runs**; auditor, 2026-11-11) — owns:
+  `e2e/**` — depends on: this Acceptance list; 03 T2 fixtures — done when: the specs compile and
+  are tagged by area, with a small `@smoke` set; the busy-session seek and Hotspots items read K5's
+  kept day files (02 K5). They first run at Gate 2.
+  - **Run 1 (B3)**, timed to end when 04 R7b and 05 S8 land: the host page that loads the recorder
+    against `apps/server` (from source until R11, then the built bundles); the walking-skeleton
+    page and the script that regenerates 03's `session-v1-golden` (the leader runs both, 01
+    Batches); the specs for the Acceptance items above that need a browser; and 06's UI specs in
+    `e2e/replay-ui/**`, including the browser checks moved out of 06 U1 and U4b.
+  - **Run 2 (B4)**, in the same qa start as 07 PL7: 04's browser contract specs in
+    `e2e/recorder/**` (golden replay, exactness at clicks, the R9 zero-warnings spec unless R9 is
+    deferred, no iframe requests) and 06 U10's golden-from-server spec.
 - [ ] P6 Pilot hardening: monitoring alerts (05 S12), a written erasure and legal-hold procedure, a backup restore drill with the escrowed key (devil X21),
   and a kill-switch runbook (08 §6–§9) — owner: leader + user — before the pilot.
 - [ ] Post-MVP: `oauth-proxy` in front of the replay UI (D38), recommended before rolling out
@@ -710,19 +730,38 @@ eight needed the user and were answered on 2026-11-11 (marked *user*).
 Kept as they are: both themes in v1 (*user*: the devil suggested moving dark mode to v1.1); `hc<QueryApi>`
 (the typed fetch alternative is optional); D16 itself, unless K3's go / no-go sends it back to the user.
 
+### Auditor pass (2026-11-11)
+
+A second auditor run over 01–08 (09 and 10 only where they meet v1), after the overall review
+changed the task set and order. Verdict: ready with suggestions; no blocker for the first B1
+handoff. The goal and every Acceptance list are unchanged. All nine were applied; two were the
+user's call (*user*).
+
+| # | Finding | Change | Where |
+|---|---|---|---|
+| 1 | Every filler task needs a B2 task first, so slots sat idle while Gate 1 waited for K0 → K2 → K3's headline runs | Gate 1 is review + checks only; a separate go / no-go holds S4 and R2 (*user*) | Batches; 02 L9, K3; 04 R2; 05 S4 |
+| 2 | K3 measured while agents built and tested on the same machine; 02 said both "while B1 runs" and "outside agent runs" | K3 and K5 run only in quiet windows on this machine: headline runs in an evening, sweeps and soak overnight, K5 back-to-back with Gate 2's full e2e (*user*) | Batches; 02 K3, K5, Guidelines, Risks |
+| 3 | The approval handoff started 4 agents | K0's snippet, X1, T1; K2a takes the snippet's slot; K1 moves behind B1's first coder runs (nothing needs it before K3's cap sweeps) | Lean handoff; 02 L1, K1 |
+| 4 | The recorder's core entry (`__SR_CORE__.start`) and the walking-skeleton page had no owner | R7b owns `src/core/**`, R8 extends it, R11 builds from it; X2's first run writes the skeleton page and golden script; the skeleton goes through the loader, so it waits for S8; R4 → R7a → R7b come first in B3 | Batches, X2; 03 T2; 04 R7b, R8, R11 |
+| 5 | K2 waited for K0's JSON before its first `bun add` | The leader asks the user for the versions at approval; K2 splits into K2a (headline runs) and K2b (the rest, after the headline runs); the ticker mix comes from a profile file the leader fills from K0 | 02 L8, K0, K2a, K2b, K3; 04 R0 |
+| 6 | U1, U4b and U10 needed a real browser inside coder runs | Those checks move to X2's qa specs; the coder runs keep the unit-testable parts | 06 U1, U4b, U10 |
+| 7 | Up to four qa spec runs | Two: X2 run 1 (B3) and run 2 (B4, with PL7) | X2; 04 note; 06 U10; 07 PL7 |
+| 8 | Several user questions waited for all of K3 | The headline runs add the worker variant; Q19, Q45, Q46, D11 and K4's RTK result go to the user in one round at the go / no-go; R8, R9 and R11 wait for that round, not all of K3 | Batches; Open questions; 02 K3; 04 R8, R9, R11 |
+| 9 | Small mismatches | B4 row says S13 ∥ S14 (as 05); I3 runs before I2 (shared folder); S16 moves next to S10 after Gate 2, one reviewer run for both | Batches; 05 S16; 08 I2, I3 |
+
 ## Open questions
 
 Answered by the user on 2026-11-10 in a one-by-one round (Q24–Q42). The console and analytics round (D43, D44) is answered too; MVP2 analytics questions live in [09](09-analytics.md) → Open questions. What is still open:
 
 | # | When | Question | Status |
 |---|---|---|---|
-| 19 | after P1 | The busiest desk doesn't fit the budget, or its bytes per minute are far above the first assumption | First levers: the source fixes in D32 (cell renderer `refresh()`, hidden grids suspended), then D36 rate caps, then a larger budget or more storage for that desk. If `full` fits at S2 without caps, the leader asks the user at K3 whether to defer R9, with its Rate-caps Acceptance items and spec, to v2. If the main-thread pipeline stays at or under 0.5 % CPU (D11), R11 builds only the outputs, in R10's run. Decided with P1's numbers |
+| 19 | at the go / no-go | The busiest desk doesn't fit the budget, or its bytes per minute are far above the first assumption | First levers: the source fixes in D32 (cell renderer `refresh()`, hidden grids suspended), then D36 rate caps, then a larger budget or more storage for that desk. If `full` fits at S2 without caps, the leader asks the user in the go / no-go round whether to defer R9, with its Rate-caps Acceptance items and spec, to v2. If the main-thread pipeline stays at or under 0.5 % CPU (D11, the headline runs' worker variant), R11 builds only the outputs, in R10's run. Decided with the S2 headline numbers |
 | 36 | before B5 | Internal npm registry and package scope (keep `@sr`?); image registry and per-region promotion | Not decided yet (user) |
 | 37 | before B5 | Block storage class and VolumeSnapshotClass per cluster; object storage for closed day files and backups | Not known yet (user); the startup check refuses network filesystems anyway |
 | 40 | before B5 | Pilot region, desk and first 2–3 users | Decide later (user) |
 | 43 | after the B5 spike (08 I6) | Log AG Grid data like Redux state? If so, which way: read the replay DOM, snapshots only, or a coalesced row log? | TODO (user, 2026-11-10). Start with the coalesced row log (08 §13, option C); it reuses the MVP bridge, so the baseline needs no change |
-| 45 | at K3 | The snapshot budget: X ms per checkpoint or resume snapshot, at most one per N minutes at S2 (Acceptance → Performance) | K3 proposes; the user decides with the numbers (overall review, 2026-11-11) |
-| 46 | at K3 | How many minutes of server outage a busy desk (4 windows) must survive without loss (Acceptance → Delivery) | Target 120; K3's queue-cap rule gives what fits; the user confirms |
+| 45 | at the go / no-go | The snapshot budget: X ms per checkpoint or resume snapshot, at most one per N minutes at S2 (Acceptance → Performance) | K3 proposes from the headline runs; the user decides in the go / no-go round (overall review, 2026-11-11) |
+| 46 | at the go / no-go | How many minutes of server outage a busy desk (4 windows) must survive without loss (Acceptance → Delivery) | Target 120; K3's queue-cap rule gives what fits; the user confirms |
 | 44 | — | Production AMPS access for a server-side collector | Not needed: the user chose browser capture of AMPS commands and acks (2026-11-11, plan 10 M1) |
 
 **Answers from the 2026-11-10 round** (user):
@@ -906,3 +945,4 @@ Q14 (performance wins, with a source fix raised: D8, D32), Q15 (asset cache behi
 - 2026-11-11 — AMPS feed health brainstorm started and put on hold (user): purpose, scope, timing (v1.1) and the preferred server-side route recorded under Scope → Later; Q44 (access to production AMPS) open. D41 stands for the pilot.
 - 2026-11-11 — Health brainstorm (user): AMPS command log captured in the browser (commands and acks, never data; Q44 no longer needed) and app vitals (slow or frozen, memory, DOM size), both v1.1 in the new plan 10 (`10-health.md`).
 - 2026-11-11 — Overall architect and devil review of 01–10 (user asked). Resolution table under Risks → "Overall review resolution". User answers: K0 real-app profile in B0; asset cache on for the pilot; `pw`, `pwd`, `passwd`, `jwt`, `cookie` as secret words; S10 after Gate 2 with encrypted storage required; both themes stay; `oauth-proxy` as a ready B5 component (S16); size for 4 windows per user; per-region seal times with UTC days. D18, D27, D31, D33, D37 and D38 amended; Acceptance gains the snapshot budget (Q45), outage minutes (Q46), version skew, node loss and holds backup; Batches gain K0, the S2 gate on Gate 1, the reordered server lane, the walking skeleton and S16.
+- 2026-11-11 — Second auditor pass applied (leader; Risks → "Auditor pass (2026-11-11)"). User answers: Gate 1 is review + checks only, with a separate go / no-go that holds S4 and R2; K3 and K5 run in quiet windows on this machine. Also: a 3-slot approval handoff with K1 later; K2 split into K2a and K2b; one user round at the go / no-go (Q19, Q45, Q46, D11, RTK), which R8, R9 and R11 wait for; R7b owns the recorder core entry and X2 owns the skeleton page; two qa spec runs; browser checks out of coder done-whens; S13 ∥ S14, I3 before I2, S16 beside S10. Goal and Acceptance unchanged.

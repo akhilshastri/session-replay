@@ -717,8 +717,8 @@ only reads the bridge.
 ## Tasks
 
 - [ ] **I1 Examples** — owns: `examples/**` — batch: B4 — depends on: 07 PL5–PL6 fixture apps; 04's recorder options; 05's config format — done when: `examples/{webpack5-host,vite7-remote,gateway,config}` exist; `bun test examples` parses each and checks plugin order.
-- [ ] **I2 Guide pages** — owns: `docs/integration/**` (except the dry-run report) — batch: B4 — depends on: I1 — done when: §1–§12 exist as pages; every sample is labelled; a link check passes; reviewer passes.
-- [ ] **I3 Publish dry run** — owns: `docs/integration/publishing.md` — batch: B4, a leader command once the package builds exist (04 R11, 07 PL4); I2 writes the page around its output, and B5 adds only the registry name — depends on: the 04 and state-plugin package builds — done when: `bun publish --dry-run` for each package lists only `dist/` and `package.json`; the page records the real registry once the user names it. (Package `files` and `publishConfig` belong to those packages' plans.)
+- [ ] **I2 Guide pages** — owns: `docs/integration/**` (except the dry-run report) — batch: B4 — depends on: I1, I3 (I2 writes `publishing.md` around I3's output; auditor, 2026-11-11) — done when: §1–§12 exist as pages; every sample is labelled; a link check passes; reviewer passes.
+- [ ] **I3 Publish dry run** — owns: its command output (the leader passes it to I2's brief); in B5, the registry name in `docs/integration/publishing.md` — batch: B4, a leader command once the package builds exist (04 R11, 07 PL4), **before I2**, which writes the page around its output; B5 adds only the registry name — depends on: the 04 and state-plugin package builds — done when: `bun publish --dry-run` for each package lists only `dist/` and `package.json`; the page records the real registry once the user names it. (Package `files` and `publishConfig` belong to those packages' plans.)
 - [ ] **I4 Real-workspace dry run** — owns: branch `sr/dry-run` in the real workspace; `docs/integration/dry-run-report.md` here — batch: B5 — depends on: I1–I3; a dev namespace with the server image — done when: §12 is complete and §8 passes. Run by the leader with the user, not a coder slice.
 - [ ] **I6 Grid data log spike (post-MVP TODO)** — owns: the `gridLog` helper on branch `sr/dry-run` in the real workspace; the "Grid data log" section of `docs/integration/dry-run-report.md` here — batch: B5, after I4 — depends on: I4 steps 1–5 working — done when: the §13 checklist is ticked, its numbers are in the report, and 01 Q43 has an answer. Run by the leader with the user, not a coder slice; no baseline package changes.
 - [ ] **I5 Pilot rollout** — owns: region config (stages 0–2) — batch: B5 — depends on: I4; DPIA and staff notice — done when: stage 2's exit criteria are met. User-led.
@@ -746,7 +746,7 @@ Still open, before B5 (01 Q36, Q37, Q40):
 1. Which internal npm registry and package scope (keep `@sr` or rename), and which image registry?
 2. Storage classes, snapshot classes and object storage per cluster (05).
 3. Which region runs the pilot, and which desk and 2–3 users go first?
-4. The real versions of React, Redux, AG Grid, flexlayout-react, webpack and Vite: now read in B0 by 02 K0 (user, 2026-11-11); the dry run re-checks webpack and Vite.
+4. The real versions of React, Redux, AG Grid, flexlayout-react, webpack and Vite: the user gives the first four at approval (for 02 K2a), 02 K0 confirms them in B0 (user, 2026-11-11); the dry run re-checks webpack and Vite.
 
 After the B5 spike (01 Q43): log AG Grid data like Redux state, and which way (§13, I6)?
 
@@ -761,3 +761,4 @@ After the B5 spike (01 Q43): log AG Grid data like Redux state, and which way (�
 - 2026-11-10 — Console levels (01 D43): how the central team turns on more levels per region, and a troubleshooting row for the DevTools call site. MVP2 tab facts come from the `$dom` probe (09), not the host snippet.
 - 2026-11-10 — Console and analytics review merged (leader): console capture follows the record/replay rules (user); the DPIA and staff notice name it before stage 1.
 - 2026-11-11 — Overall architect and devil review (01 → Overall review resolution): `data-sr-grid="<remote>/<grid>"` (L7); bundles move to `session-recorder/<version>/`; the pilot config turns the asset cache on (user) and §8 checks fonts and icons; deploy order (servers and UI everywhere first); stage-1 preconditions (off-PVC backup, encrypted storage) and the `oauth-proxy` component if the DPIA asks (user); stage 2 measures `sr_recorder_cost_ratio`; per-region seal grace; `pw` cases in §8; real versions come from K0 in B0.
+- 2026-11-11 — Second auditor pass (01): I3 runs before I2, and I2 writes `publishing.md` around its output (they shared the page); the versions are asked at approval and K0 confirms them.

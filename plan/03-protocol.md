@@ -517,7 +517,9 @@ Every package tests against these fixtures, so parallel work meets at the same s
   done when the Acceptance items pass and `exports` has `.`, `./core` (zod-free, L17), `./publish` and `./secrets` (`isSecretKey`, moved from 04's serializer, and `maskCutToken`; no imports; D43).
 - [ ] T2 Golden fixtures — owns: `packages/protocol/fixtures/**` — batch: **B1** — depends on: T1 —
   done when the fixtures validate, `batch-future.json` is in place (L16), and `session-v1-golden`
-  replays in the spike Replayer (it is regenerated from real output at the B3 walking skeleton).
+  replays in the spike Replayer (it is regenerated from real output at the B3 walking skeleton:
+  the leader runs 01 X2's regeneration script, then root `bun test` once; that is the only write
+  to `fixtures/**` after T2).
 
 ## Risks
 
@@ -553,3 +555,4 @@ Every package tests against these fixtures, so parallel work meets at the same s
 - 2026-11-10 — Console capture (01 D43): `ConsoleLevel`, the `sr:console` tag and event, `count` on `sr:error`, `RecorderConfig.console` (default `error` and `warn`, 10/s, 2,000 chars), `ActionKind` `console` with `level` and `count` on `ActionRow`, `counts.errors` includes `console.error`; L15: only `error` and `warn` become server action rows. All additive. MVP2 analytics contracts (`Fact`, `AnalyticsQuery`, `AnalyticsResult`, `domProbes`) are added additively at MVP2 start (09 AN0).
 - 2026-11-10 — Console and analytics review merged (leader). `sr:error` and `sr:console` gain `dropped` and `same`; `sr:redacted` gains `userinfo`; `console-capped` note; `RecorderConfig.console` gets per-field defaults, bounds and `maxPerRecording` with `.prefault({})`; `counts.errors` stays `sr:error` only and the new `counts.consoleErrors` holds console errors (L15 rewritten); new zod-free entry `@sr/protocol/secrets` with `isSecretKey` and `maskCutToken` (T1); T2 fixtures carry console and error lines. All additive.
 - 2026-11-11 — Overall architect and devil review (01 → Overall review resolution): L16 tolerant readers (widened enums on the read side, `bandKind` default, the server serves the parsed config, the recorder's own defaults, deploy order, `batch-future.json`); L17 zod-free `@sr/protocol/core`; L18 version stamps (`recorderVersion`, `rrwebVersion`, `rv`, `tz`, `meta.plugin`); `sr:cost` once a minute; `no-state` only after a remote's entry has loaded; hotspot `remote` from `data-sr-grid`; the pilot sample turns the asset cache on (user); the golden recording is regenerated from real output at the B3 walking skeleton.
+- 2026-11-11 — Second auditor pass (01): the golden regeneration has an owner: 01 X2 writes the script, the leader runs it and then root `bun test` once (T2). No contract change.
