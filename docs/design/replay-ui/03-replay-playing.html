@@ -1,0 +1,582 @@
+<!doctype html>
+<!--
+  03 — Replay playing (plan 06 spec §3b). The REFERENCE SHELL: mocks 01, 02, 04-09 copy this markup.
+  Scenario: user u123, blotter 4.2.1, Mon 10 Nov 2026 (EST). Play head 09:24:58, inside the
+  "paused: app busy" band, so the gap banner shows. Sessions border collapsed. Actions follows the
+  play head with the State chip on. State tab active; Diff, Info, Console and Network by tab click.
+  Variants (MOCK pill, bottom left): Sessions open · frozen scrubber hover.
+  Each region below is introduced by a comment between ═══ marks. Everything is static HTML; mock.css + mock.js do the rest.
+-->
+<html lang="en" data-mantine-color-scheme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Replay playing · Session Replay mock 03</title>
+<script src="mock.js"></script>
+<link rel="stylesheet" href="mock.css">
+<style>
+  /* Page-only styles: variants and the Diff Changes/Payload switch. */
+  .fl-border-panel { display: none; }
+  body[data-variant="sessions"] .fl-border-panel { display: flex; }
+  body[data-variant="sessions"] .fl-border-tab { color: var(--mantine-color-text); }
+  body[data-variant="sessions"] .fl-border-tab::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--sr-accent-text); }
+  .scrub-hover { display: none; }
+  body[data-variant="hover"] .scrub-hover { display: block; }
+  .dv-payload { display: none; }
+  [data-panel="diff"]:has(#dv-payload:checked) .dv-payload { display: block; }
+  [data-panel="diff"]:has(#dv-payload:checked) .dv-changes { display: none; }
+</style>
+</head>
+<body data-variants="playing:Playing · Sessions collapsed;sessions:Sessions border open;hover:Scrubber hover (frozen)">
+<div class="app">
+
+  <!-- ═══ HEADER (40 px): mark, title, region, nav · theme, Layout menu, shortcuts ═══ -->
+  <header class="hdr">
+    <a class="brand" href="index.html">
+      <svg class="mark" viewBox="0 0 18 18" aria-hidden="true"><path d="M4 1.5l9 5-9 5z"/><rect x="1" y="14" width="4.6" height="2.5" rx="1"/><rect x="6.7" y="14" width="4.6" height="2.5" rx="1" opacity=".7"/><rect x="12.4" y="14" width="4.6" height="2.5" rx="1" opacity=".4"/></svg>
+      Session Replay
+    </a>
+    <span class="badge" tabindex="0" data-tip="Region: North America. Recordings stay in their region." data-tip-pos="bottom">NAM</span>
+    <nav class="nav" aria-label="Main">
+      <a class="nav-link" href="03-replay-playing.html" aria-current="page">Replay</a>
+      <a class="nav-link" href="07-hotspots.html">Hotspots</a>
+    </nav>
+    <div class="hdr-right">
+      <!-- Theme menu: System / Light / Dark. mock.js ticks the current one and writes "(dark now)". -->
+      <span class="pop-wrap">
+        <button class="ai" type="button" data-pop-toggle aria-haspopup="menu" aria-label="Colour theme" data-tip="Colour theme" data-tip-pos="bottom"><svg class="ic"><use href="#i-sun-moon"/></svg></button>
+        <div class="pop pop-r" role="menu" hidden>
+          <button class="menu-item" type="button" role="menuitemradio" data-scheme="auto" aria-checked="false"><svg class="ic menu-check"><use href="#i-check"/></svg><span>System<span class="sys-now dim"></span></span></button>
+          <button class="menu-item" type="button" role="menuitemradio" data-scheme="light" aria-checked="false"><svg class="ic menu-check"><use href="#i-check"/></svg>Light</button>
+          <button class="menu-item" type="button" role="menuitemradio" data-scheme="dark" aria-checked="false"><svg class="ic menu-check"><use href="#i-check"/></svg>Dark</button>
+        </div>
+      </span>
+      <!-- Layout menu (spec §3g-2). Sessions and Player are locked open. -->
+      <span class="pop-wrap">
+        <button class="btn btn-subtle" type="button" data-pop-toggle aria-haspopup="menu"><svg class="ic"><use href="#i-layout-board"/></svg>Layout<svg class="ic ic-12"><use href="#i-chevron-down"/></svg></button>
+        <div class="pop pop-r" role="menu" hidden style="min-width:230px">
+          <span class="menu-label">Panels</span>
+          <button class="menu-item" type="button" role="menuitemcheckbox" aria-checked="true" aria-disabled="true" data-tip="Can't be closed" data-tip-pos="left"><svg class="ic menu-check"><use href="#i-check"/></svg>Sessions<span class="menu-end"><svg class="ic ic-12"><use href="#i-lock"/></svg></span></button>
+          <button class="menu-item" type="button" role="menuitemcheckbox" aria-checked="true" aria-disabled="true"><svg class="ic menu-check"><use href="#i-check"/></svg>Player<span class="menu-end"><svg class="ic ic-12"><use href="#i-lock"/></svg></span></button>
+          <button class="menu-item" type="button" role="menuitemcheckbox" aria-checked="true"><svg class="ic menu-check"><use href="#i-check"/></svg>Actions</button>
+          <button class="menu-item" type="button" role="menuitemcheckbox" aria-checked="true"><svg class="ic menu-check"><use href="#i-check"/></svg>Console</button>
+          <button class="menu-item" type="button" role="menuitemcheckbox" aria-checked="true"><svg class="ic menu-check"><use href="#i-check"/></svg>Network</button>
+          <button class="menu-item" type="button" role="menuitemcheckbox" aria-checked="true"><svg class="ic menu-check"><use href="#i-check"/></svg>State</button>
+          <button class="menu-item" type="button" role="menuitemcheckbox" aria-checked="true"><svg class="ic menu-check"><use href="#i-check"/></svg>Diff</button>
+          <button class="menu-item" type="button" role="menuitemcheckbox" aria-checked="true"><svg class="ic menu-check"><use href="#i-check"/></svg>Info</button>
+          <div class="hr"></div>
+          <button class="menu-item" type="button" role="menuitem"><svg class="ic menu-check" style="visibility:visible"><use href="#i-arrows-maximize"/></svg>Maximise player<span class="menu-end"><span class="kbd">M</span></span></button>
+          <button class="menu-item" type="button" role="menuitem"><svg class="ic menu-check" style="visibility:visible"><use href="#i-refresh"/></svg>Reset layout</button>
+          <div class="hr"></div>
+          <span class="menu-note">Saved in this browser.</span>
+        </div>
+      </span>
+      <a class="ai" href="08-shortcuts.html" aria-label="Keyboard shortcuts" data-tip="Keyboard shortcuts (?)" data-tip-pos="bottom-end"><svg class="ic"><use href="#i-keyboard"/></svg></a>
+    </div>
+  </header>
+
+  <!-- ═══ SESSION BAR (28 px): session facts left (truncates first), the two notes right (never truncate) ═══ -->
+  <div class="sbar">
+    <div class="sbar-main">
+      <span class="trunc"><b>u123</b> · blotter 4.2.1 · Mon 10 Nov 2026</span>
+      <span style="flex:none"> · 09:02:14–10:14:51 <span class="zone" tabindex="0" data-tip="The user's time zone: America/New_York (UTC−5). Hover any time to see UTC." data-tip-pos="bottom-start" style="text-decoration:underline dotted">EST</span> · 1h 12m · 3 recordings</span>
+    </div>
+    <div class="sbar-notes">
+      <span class="badge" tabindex="0" data-tip="The browser sent this user id and nothing checked it. The replay shows what the browser sent, not who sent it." data-tip-pos="bottom-end"><svg class="ic"><use href="#i-info-circle"/></svg>Identity: client-asserted</span>
+      <span class="note note-ok" tabindex="0" data-tip="All 38 chunks read so far matched their sha256. That shows nothing changed after the server received them. It doesn't show who sent them." data-tip-pos="bottom-end"><svg class="ic"><use href="#i-check"/></svg>Unchanged since received</span>
+      <button class="btn btn-subtle" type="button" data-goto-tab="info">Info</button>
+    </div>
+  </div>
+
+  <!-- ═══ WORKSPACE (flexlayout): left border strip · Sessions drawer · [ left column | right column ] ═══ -->
+  <main class="fl">
+
+    <!-- Left border strip (28 px). The accent bar shows when the drawer is open (variant "Sessions border open"). -->
+    <div class="fl-border">
+      <div class="fl-border-tab" role="tab" tabindex="0" aria-selected="false" title="Find sessions by user and day"><span class="fl-vtext">Sessions</span></div>
+    </div>
+
+    <!-- Sessions drawer (320 px). Hidden in the default variant. -->
+    <aside class="fl-border-panel" aria-label="Sessions">
+      <div class="pn-tools" style="flex-direction:column;align-items:stretch">
+        <div><label class="label xs b6" for="s-user" style="margin-bottom:2px">User id</label>
+          <span class="field"><svg class="ic field-ic"><use href="#i-search"/></svg><input id="s-user" class="input" value="u123"><span class="field-end"><button class="ai" type="button" aria-label="Clear user id" style="width:18px;height:18px"><svg class="ic ic-12"><use href="#i-x"/></svg></button></span></span></div>
+        <div><span class="label xs b6" style="margin-bottom:2px">Day (UTC)</span>
+          <div class="row-flex" style="gap:4px"><button class="ai ai-default" type="button" aria-label="Previous day"><svg class="ic ic-14"><use href="#i-chevron-left"/></svg></button><span class="input grow" style="display:flex;align-items:center">2026-11-10</span><button class="ai ai-default" type="button" aria-label="Next day"><svg class="ic ic-14"><use href="#i-chevron-right"/></svg></button></div></div>
+        <label class="cb"><input type="checkbox"> Errors only</label>
+        <span class="xs dim">4 sessions</span>
+      </div>
+      <div class="pn-scroll" role="listbox" aria-label="Sessions on 2026-11-10">
+        <div class="ses" role="option"><div class="ses-l1"><span>07:48–08:02 EST</span><span class="dim">14m</span></div><div class="ses-l2"><span>u123 · risk-viewer 2.3.0</span></div></div>
+        <div class="ses is-open" role="option" aria-selected="true"><div class="ses-l1"><span>09:02–10:14 EST</span><span class="dim">1h 12m</span></div>
+          <div class="ses-l2"><span>u123 · blotter 4.2.1</span>
+            <span class="ses-badges">
+              <span class="cnt cnt-warn" data-tip="3 errors (uncaught + console.error)"><svg class="ic"><use href="#i-alert-triangle"/></svg>3</span>
+              <span class="cnt cnt-fail" data-tip="2 failed requests"><svg class="ic"><use href="#i-circle-x"/></svg>2</span>
+              <span class="cnt cnt-report" data-tip="1 user report"><svg class="ic"><use href="#i-flag"/></svg>1</span>
+              <span class="cnt cnt-gap" data-tip="6 recording gaps"><svg class="ic"><use href="#i-texture"/></svg>6</span>
+            </span></div></div>
+        <div class="ses" role="option"><div class="ses-l1"><span>11:20–11:41 EST</span><span class="dim">21m</span></div>
+          <div class="ses-l2"><span>u123 · blotter 4.2.1</span><span class="ses-badges"><span class="cnt cnt-gap" data-tip="1 recording gap"><svg class="ic"><use href="#i-texture"/></svg>1</span></span></div></div>
+        <div class="ses" role="option"><div class="ses-l1"><span>13:05–now</span><span class="dim">1h 03m</span></div>
+          <div class="ses-l2"><span>u123 · blotter 4.2.1</span>
+            <span class="ses-badges"><span class="cnt cnt-warn" data-tip="1 error"><svg class="ic"><use href="#i-alert-triangle"/></svg>1</span><span class="badge badge-xs badge-light c-blue" data-tip="Still recording"><span class="dot"></span>Live</span></span></div></div>
+      </div>
+    </aside>
+
+    <div class="fl-main">
+
+      <!-- ═══ LEFT COLUMN (weight 64): Player over Console · Network ═══ -->
+      <div class="fl-col" style="--wt:64">
+
+        <!-- ─── Tabset ts-player: Player (no ×, so it can't be closed) ─── -->
+        <section class="fl-tabset" data-tabset style="--wt:70" aria-label="Player">
+          <div class="fl-strip">
+            <div class="fl-tabs" role="tablist">
+              <!-- The leading icon shows play / pause even when another tab covers the Player. -->
+              <div class="fl-tab no-close" role="tab" tabindex="0" aria-selected="true" data-tab="player" title="The recorded screen"><svg class="ic ic-f fl-tab-ic"><use href="#i-f-player-play"/></svg>Player<span class="sr-only">(playing)</span></div>
+            </div>
+            <div class="fl-toolbar"><button class="fl-tb" type="button" data-maximize aria-pressed="false" aria-label="Maximise Player (M)"><svg class="ic ic-max"><use href="#i-arrows-maximize"/></svg><svg class="ic ic-min"><use href="#i-arrows-minimize"/></svg></button></div>
+          </div>
+          <div class="fl-body">
+            <div class="fl-panel" data-panel="player">
+              <div class="player">
+
+                <!-- Stage: letterbox + the recorded screen scaled to Fit (mock.js sets --fit). The banner floats on top. -->
+                <div class="stage" data-fit>
+                  <!-- Gap banner (top of the stage, doesn't push layout). Up to 2 stack; then "+1 more" opens the Legend. -->
+                  <div class="banner">
+                    <div class="alert c-yellow" role="status">
+                      <span class="sw b-pause" aria-hidden="true" style="margin-top:1px"></span>
+                      <div class="grow">
+                        <div class="alert-title">Recording paused: app busy.</div>
+                        <div class="alert-body">Paused 09:24:10–09:25:52 to keep the app fast. The screen may have changed in that time.</div>
+                      </div>
+                      <button class="btn btn-filled" type="button">Skip to 09:25:52</button>
+                    </div>
+                  </div>
+
+                  <!-- Recorded screen stand-in: 2560×1400 blotter "Positions" page in its own light colours. -->
+                  <div class="rs-fit"><div class="rs" aria-label="Recorded blotter screen, Positions page">
+                    <div class="rs-top"><b>Blotter 4.2.1</b><span>Orders</span><span class="on">Positions</span><span>Pricing</span><span>Risk</span><span class="who">u123 · NAM</span></div>
+                    <div class="rs-body">
+                      <div class="rs-main">
+                        <div class="rs-card rs-grid">
+                          <h4>Positions · EQ-NA <span>12 of 214 rows</span></h4>
+                          <div class="rs-gr h"><i>Symbol</i><i>Qty</i><i>Avg px</i><i>Bid</i><i>Ask</i><i>Mid</i><i>P&amp;L</i><i>Chg %</i></div>
+                          <div class="rs-gr"><i>AAPL</i><i>1,200</i><i>226.10</i><i>228.31</i><i>228.35</i><i>228.33</i><i class="rs-up">+2,664</i><i class="rs-up">+0.97</i></div>
+                          <div class="rs-gr z"><i>MSFT</i><i>800</i><i>428.90</i><i>431.12</i><i>431.18</i><i>431.15</i><i class="rs-up">+1,776</i><i class="rs-up">+0.52</i></div>
+                          <div class="rs-gr"><i>NVDA</i><i>450</i><i>131.40</i><i>129.88</i><i>129.92</i><i>129.90</i><i class="rs-dn">-675</i><i class="rs-dn">-1.15</i></div>
+                          <div class="rs-gr z"><i>AMZN</i><i>600</i><i>198.20</i><i>199.44</i><i>199.50</i><i>199.47</i><i class="rs-up">+756</i><i class="rs-up">+0.63</i></div>
+                          <div class="rs-gr"><i>GOOGL</i><i>350</i><i>172.65</i><i>173.02</i><i>173.08</i><i>173.05</i><i class="rs-up">+140</i><i class="rs-up">+0.21</i></div>
+                          <div class="rs-gr z"><i>META</i><i>220</i><i>581.30</i><i>577.10</i><i>577.40</i><i>577.25</i><i class="rs-dn">-924</i><i class="rs-dn">-0.72</i></div>
+                          <div class="rs-gr"><i>TSLA</i><i>300</i><i>242.80</i><i>245.60</i><i>245.72</i><i>245.66</i><i class="rs-up">+840</i><i class="rs-up">+1.16</i></div>
+                          <div class="rs-gr z"><i>JPM</i><i>500</i><i>214.15</i><i>216.70</i><i>216.76</i><i>216.73</i><i class="rs-up">+1,275</i><i class="rs-up">+1.19</i></div>
+                          <div class="rs-gr"><i>V</i><i>260</i><i>288.00</i><i>289.35</i><i>289.45</i><i>289.40</i><i class="rs-up">+351</i><i class="rs-up">+0.47</i></div>
+                          <div class="rs-gr z"><i>XOM</i><i>900</i><i>112.40</i><i>111.62</i><i>111.66</i><i>111.64</i><i class="rs-dn">-702</i><i class="rs-dn">-0.69</i></div>
+                          <div class="rs-gr"><i>UNH</i><i>140</i><i>512.70</i><i>518.20</i><i>518.50</i><i>518.35</i><i class="rs-up">+770</i><i class="rs-up">+1.07</i></div>
+                          <div class="rs-gr z"><i>KO</i><i>1,500</i><i>62.35</i><i>62.80</i><i>62.84</i><i>62.82</i><i class="rs-up">+675</i><i class="rs-up">+0.72</i></div>
+                        </div>
+                      </div>
+                      <div class="rs-side">
+                        <div class="rs-card"><h4>Open orders <span>1</span></h4>
+                          <div class="rs-gr h" style="grid-template-columns:1fr 1fr 1fr 1.2fr"><i>Id</i><i>Side</i><i>Qty</i><i>Status</i></div>
+                          <div class="rs-gr" style="grid-template-columns:1fr 1fr 1fr 1.2fr"><i>o-1783</i><i>Buy</i><i>100</i><i>pending</i></div></div>
+                        <div class="rs-card"><h4>Pricing ladder <span>AAPL</span></h4>
+                          <div class="rs-gr h" style="grid-template-columns:1fr 1fr 1fr"><i>Bid sz</i><i>Price</i><i>Ask sz</i></div>
+                          <div class="rs-gr" style="grid-template-columns:1fr 1fr 1fr"><i></i><i>228.38</i><i>1,100</i></div>
+                          <div class="rs-gr z" style="grid-template-columns:1fr 1fr 1fr"><i></i><i>228.36</i><i>400</i></div>
+                          <div class="rs-gr" style="grid-template-columns:1fr 1fr 1fr"><i>700</i><i>228.33</i><i></i></div>
+                          <div class="rs-gr z" style="grid-template-columns:1fr 1fr 1fr"><i>1,500</i><i>228.31</i><i></i></div></div>
+                      </div>
+                    </div>
+                  </div></div>
+                </div>
+
+                <!-- Scrubber (62 px): 3 lanes · Events, Screen, State. Session = 09:02:14–10:14:51 = 4357 s.
+                     --l / --w are percentages of that span. role=slider for keyboard + screen readers. -->
+                <div class="scrub" tabindex="0" role="slider" aria-label="Playback position" aria-valuemin="0" aria-valuemax="4357" aria-valuenow="1364" aria-valuetext="09:24:58 EST, 22 min 44 s of 1 h 12 min">
+                  <div class="scrub-gut" aria-hidden="true"><span class="g-ev">Events</span><span class="g-sc">Screen</span><span class="g-st">State</span></div>
+                  <div class="scrub-plot">
+
+                    <!-- Events lane (12 px): ▲ error · ✖ failed request · ⚑ report · ◆ note. Markers under 4 px apart merge. -->
+                    <div class="lane lane-ev">
+                      <span class="mk mk-note" style="--l:4.09%" data-tip="◆ State key capped&#10;blotterCache was over 256 KB (1.4 MB) and isn't recorded from 09:05:12."><svg class="ic ic-f"><use href="#i-m-note"/></svg></span>
+                      <span class="mk mk-error" style="--l:32.95%" data-tip="09:26:07 ✖ POST 500 /api/orders/o-1783/amend&#10;09:26:08 ▲ TypeError ×2&#10;09:26:15 ⚑ Order stuck in pending"><svg class="ic ic-f mk-error"><use href="#i-m-error"/></svg><svg class="ic ic-f mk-fail"><use href="#i-m-fail"/></svg><svg class="ic ic-f mk-report"><use href="#i-m-report"/></svg></span>
+                      <span class="mk mk-note" style="--l:67.84%" data-tip="◆ No clean close&#10;Recording ended without a clean close: the last seconds may be missing."><svg class="ic ic-f"><use href="#i-m-note"/></svg></span>
+                      <span class="mk mk-error" style="--l:92.75%" data-tip="10:09:32 ✖ DELETE /api/orders/o-1783 failed&#10;10:09:40 ▲ Cancel failed: network error"><svg class="ic ic-f mk-fail"><use href="#i-m-fail"/></svg><svg class="ic ic-f mk-error"><use href="#i-m-error"/></svg></span>
+                    </div>
+
+                    <!-- Screen lane (18 px): played part, then the bands. -->
+                    <div class="lane lane-sc">
+                      <span class="played" style="--w:31.31%"></span>
+                      <span class="band b-hidden" style="--l:13.45%;--w:3.44%" data-tip="▧ Tab hidden 09:12:00–09:14:30 (2m 30s)"></span>
+                      <span class="band b-pause" style="--l:30.21%;--w:2.34%" data-tip="▧ Paused (app busy) 09:24:10–09:25:52 (1m 42s)"></span>
+                      <span class="band b-missing" style="--l:42.41%;--w:0.87%" data-tip="▧ Data missing 09:33:02–09:33:40 (38s)&#10;Batches 41–43 never arrived."></span>
+                      <span class="rec-bound" style="--l:49.44%" data-tip="Recording 2 starts 09:38:11"></span>
+                      <span class="band b-popout" style="--l:52.12%;--w:4.48%" data-tip="▧ Popout open 09:40:05–09:43:20 (3m 15s)"></span>
+                      <span class="nopage" style="--l:67.84%;--w:15.47%" data-tip="No page open 09:51:30–10:02:44 (11m 14s)">No page open · 11m</span>
+                      <span class="rec-bound" style="--l:83.31%"></span>
+                      <span class="thin b-slow" style="--l:86.44%;--w:4.13%" data-tip="Slow checkpoints 10:05:00–10:08:00&#10;Checkpoints were spaced out to keep the app fast. The screen is complete; seeking here is slower."></span>
+                    </div>
+                    <!-- Loaded strip (2 px) and State lane (6 px: no-state dashes — pricing has no store). -->
+                    <div class="lane lane-ld"><i style="--l:0%;--w:49.37%"></i></div>
+                    <div class="lane lane-st" data-tip="No state: pricing&#10;No state for pricing: it wasn't built with the plugin, or it uses Redux Toolkit. Its screens are still recorded."><span class="thin b-nostate" style="--w:100%"></span></div>
+
+                    <!-- Axis (14 px): local times at least 64 px apart. -->
+                    <div class="axis" aria-hidden="true">
+                      <span style="--l:10.69%">09:10</span><span style="--l:24.47%">09:20</span><span style="--l:38.24%">09:30</span><span style="--l:52.01%">09:40</span><span style="--l:65.78%">09:50</span><span style="--l:79.55%">10:00</span><span style="--l:93.32%">10:10</span>
+                    </div>
+
+                    <!-- Hover line + tooltip, shown frozen by the "Scrubber hover" variant. -->
+                    <div class="scrub-hover" style="--l:30.9%"><div class="tip-float">09:24:40 EST · 14:24:40 UTC&#10;+22:26&#10;▧ Paused (app busy) 09:24:10–09:25:52 (1m 42s)</div></div>
+
+                    <!-- Play head at 09:24:58 (31.31 %). -->
+                    <div class="head" style="--l:31.31%"></div>
+                  </div>
+                </div>
+
+                <!-- Transport (32 px): previous / play-pause / next / next error · speed · clock · go to time, zoom, link, legend -->
+                <div class="transport">
+                  <div class="tp-group">
+                    <button class="ai" type="button" aria-label="Previous action" data-tip="Previous action (J)"><svg class="ic"><use href="#i-player-skip-back"/></svg></button>
+                    <button class="ai" type="button" aria-label="Pause" data-tip="Pause (Space)"><svg class="ic ic-f"><use href="#i-f-player-pause"/></svg></button>
+                    <button class="ai" type="button" aria-label="Next action" data-tip="Next action (L)"><svg class="ic"><use href="#i-player-skip-forward"/></svg></button>
+                    <button class="btn btn-light c-red" type="button" data-tip="Next error or failed request (E)" style="margin-left:6px"><svg class="ic"><use href="#i-alert-triangle"/></svg>Next error</button>
+                  </div>
+                  <div class="seg" role="radiogroup" aria-label="Playback speed">
+                    <label class="seg-i"><input type="radio" name="speed"><span>0.5×</span></label>
+                    <label class="seg-i"><input type="radio" name="speed" checked><span>1×</span></label>
+                    <label class="seg-i"><input type="radio" name="speed"><span>1.5×</span></label>
+                    <label class="seg-i"><input type="radio" name="speed"><span>2×</span></label>
+                    <label class="seg-i"><input type="radio" name="speed"><span>4×</span></label>
+                    <label class="seg-i"><input type="radio" name="speed"><span>5×</span></label>
+                  </div>
+                  <span class="tp-clock" tabindex="0" data-tip="09:24:58.212 EST · 14:24:58.212 UTC">09:24:58 EST</span>
+                  <span class="tp-elapsed">+22:44 / 1:12:37</span>
+                  <div class="tp-right">
+                    <!-- Go to time (G): hh:mm[:ss] in the user's zone, or +m:ss. -->
+                    <span class="pop-wrap">
+                      <button class="ai" type="button" data-pop-toggle aria-label="Go to time" data-tip="Go to time (G)"><svg class="ic"><use href="#i-clock"/></svg></button>
+                      <div class="pop pop-up pop-r pop-wide" hidden style="width:240px">
+                        <label class="label sm b6" for="goto">Go to time</label>
+                        <div class="row-flex" style="gap:4px"><input id="goto" class="input" placeholder="09:30 or +12:30"><button class="btn btn-filled" type="button">Go</button></div>
+                        <div class="field-hint">hh:mm, hh:mm:ss, or +m:ss from the start. Times are in EST.</div>
+                      </div>
+                    </span>
+                    <!-- Zoom menu: Fit / 50 / 75 / 100 %. Above Fit the stage scrolls on both axes. -->
+                    <span class="pop-wrap">
+                      <button class="btn btn-default" type="button" data-pop-toggle aria-haspopup="menu" data-tip="Zoom the recorded screen"><svg class="ic"><use href="#i-zoom-scan"/></svg>Fit <span data-fit-label>41%</span><svg class="ic ic-12"><use href="#i-chevron-down"/></svg></button>
+                      <div class="pop pop-up pop-r" role="menu" hidden style="min-width:140px">
+                        <button class="menu-item" type="button" role="menuitemradio" aria-checked="true"><svg class="ic menu-check"><use href="#i-check"/></svg>Fit (<span data-fit-label>41%</span>)</button>
+                        <button class="menu-item" type="button" role="menuitemradio" aria-checked="false"><svg class="ic menu-check"><use href="#i-check"/></svg>50%</button>
+                        <button class="menu-item" type="button" role="menuitemradio" aria-checked="false"><svg class="ic menu-check"><use href="#i-check"/></svg>75%</button>
+                        <button class="menu-item" type="button" role="menuitemradio" aria-checked="false"><svg class="ic menu-check"><use href="#i-check"/></svg>100%</button>
+                      </div>
+                    </span>
+                    <button class="ai" type="button" aria-label="Copy link" data-tip="Copy link (C)" data-tip-pos="top-end"><svg class="ic"><use href="#i-link"/></svg></button>
+                    <!-- Legend popover: "In this session" + "Other kinds" (collapsed) + link to Info. -->
+                    <span class="pop-wrap">
+                      <button class="btn btn-default" type="button" data-pop-toggle aria-haspopup="dialog">Legend</button>
+                      <div class="pop pop-up pop-r pop-wide" hidden style="width:400px" role="dialog" aria-label="Legend">
+                        <h3 class="sec-h">In this session</h3>
+                        <div class="lg-row"><span class="sw b-pause"></span><b>Paused (app busy)</b><span class="dim">09:24:10–09:25:52</span></div>
+                        <div class="lg-row"><span class="sw b-hidden"></span><b>Tab hidden</b><span class="dim">09:12:00–09:14:30</span></div>
+                        <div class="lg-row"><span class="sw b-popout"></span><b>Popout open</b><span class="dim">09:40:05–09:43:20</span></div>
+                        <div class="lg-row"><span class="sw b-missing"></span><b>Data missing</b><span class="dim">09:33:02–09:33:40</span></div>
+                        <div class="lg-row"><span class="sw b-slow"></span><b>Slow checkpoints</b><span class="dim">10:05:00–10:08:00</span></div>
+                        <div class="lg-row"><span class="sw b-nostate"></span><b>No state: pricing</b><span class="dim">whole session</span></div>
+                        <div class="lg-row"><span class="lg-mk mk-note"><svg class="ic ic-f"><use href="#i-m-note"/></svg></span><b>State key capped</b><span class="dim">09:05:12</span></div>
+                        <div class="lg-row"><span class="lg-mk mk-note"><svg class="ic ic-f"><use href="#i-m-note"/></svg></span><b>No clean close</b><span class="dim">09:51:30</span></div>
+                        <details style="margin-top:6px"><summary class="sec-h" style="cursor:pointer;margin:0">Other kinds</summary>
+                          <div class="lg-row"><span class="sw b-quota"></span><b>Daily quota reached</b></div>
+                          <div class="lg-row"><span class="sw b-overflow"></span><b>Upload queue full</b></div>
+                          <div class="lg-row"><span class="sw b-unreadable"></span><b>Unreadable</b></div>
+                          <div class="lg-row"><span class="lg-mk mk-note"><svg class="ic ic-f"><use href="#i-m-note"/></svg></span><b>Upload fallback · Rate caps off · Console cap reached</b></div>
+                        </details>
+                        <div class="hr" style="margin:8px 0 6px"></div>
+                        <a href="#" data-goto-tab="info" class="sm">All details in Info</a>
+                      </div>
+                    </span>
+                  </div>
+                </div>
+                <div class="ratecap" title="Rate caps v2026-11-10.3: positions grid bid, ask, mid at 2/s · pricing ladder last at 4/s">Rate caps v2026-11-10.3: positions grid bid, ask, mid at 2/s · pricing ladder last at 4/s</div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <div class="fl-splitter h" aria-hidden="true"></div>
+
+        <!-- ─── Tabset ts-logs: Console (2 errors) · Network (2 failed) ─── -->
+        <section class="fl-tabset" data-tabset style="--wt:30" aria-label="Console and Network">
+          <div class="fl-strip">
+            <div class="fl-tabs" role="tablist">
+              <div class="fl-tab" role="tab" tabindex="0" aria-selected="true" data-tab="console" title="Lines the app logged">Console<span class="badge badge-xs badge-light c-red" aria-label="2 errors">2</span><button class="fl-x" type="button" tabindex="-1" aria-label="Close Console"><svg class="ic"><use href="#i-x"/></svg></button></div>
+              <div class="fl-tab" role="tab" tabindex="0" aria-selected="false" data-tab="network" title="Requests the app made">Network<span class="badge badge-xs badge-light c-red" aria-label="2 failed requests">2</span><button class="fl-x" type="button" tabindex="-1" aria-label="Close Network"><svg class="ic"><use href="#i-x"/></svg></button></div>
+            </div>
+            <div class="fl-toolbar"><button class="fl-tb" type="button" data-maximize aria-pressed="false" aria-label="Maximise this tabset"><svg class="ic ic-max"><use href="#i-arrows-maximize"/></svg><svg class="ic ic-min"><use href="#i-arrows-minimize"/></svg></button></div>
+          </div>
+          <div class="fl-body">
+
+            <!-- Console panel: level chips + filter, then rows. Error rows expand to a stack. -->
+            <div class="fl-panel" data-panel="console">
+              <div class="pn-tools">
+                <button class="chip" type="button" data-toggle aria-pressed="true"><svg class="ic chip-check"><use href="#i-check"/></svg><svg class="ic" style="color:var(--sr-danger)"><use href="#i-circle-x"/></svg>Error 2</button>
+                <button class="chip" type="button" data-toggle aria-pressed="true"><svg class="ic chip-check"><use href="#i-check"/></svg><svg class="ic" style="color:var(--sr-warning-icon)"><use href="#i-alert-triangle"/></svg>Warn 2</button>
+                <button class="chip" type="button" data-toggle aria-pressed="false"><svg class="ic chip-check"><use href="#i-check"/></svg>Info</button>
+                <button class="chip" type="button" data-toggle aria-pressed="false"><svg class="ic chip-check"><use href="#i-check"/></svg>Log</button>
+                <button class="chip" type="button" data-toggle aria-pressed="false"><svg class="ic chip-check"><use href="#i-check"/></svg>Debug</button>
+                <span class="field" style="max-width:220px;margin-left:auto"><svg class="ic field-ic"><use href="#i-search"/></svg><input class="input" placeholder="Filter" aria-label="Filter console lines"></span>
+              </div>
+              <div class="pn-scroll">
+                <details class="con con-lvl-warn"><summary><span class="act-time dim">09:24:08</span><svg class="ic"><use href="#i-alert-triangle"/></svg><span class="con-msg" title="AMPS: slow consumer on positions_v2 (1,200 messages queued)">AMPS: slow consumer on positions_v2 (1,200 messages queued)</span><span class="badge badge-xs badge-light c-gray">×4</span><svg class="ic con-chev"><use href="#i-chevron-right"/></svg></summary>
+                  <pre class="con-stack">at onSlowConsumer (positions/remoteEntry.js:2204:17)
+at Client._onError (amps-client.js:931:9)</pre></details>
+                <details class="con con-lvl-error"><summary><span class="act-time">09:26:07</span><svg class="ic" style="color:var(--sr-danger)"><use href="#i-circle-x"/></svg><span class="con-msg" title="Amend failed: 500 Internal Server Error (orderId o-1783)">Amend failed: 500 Internal Server Error (orderId o-1783)</span><span></span><svg class="ic con-chev"><use href="#i-chevron-right"/></svg></summary>
+                  <pre class="con-stack">Error: Amend failed: 500 Internal Server Error
+    at amendOrder (orders/remoteEntry.js:1182:11)
+    at async onAmendSubmit (orders/remoteEntry.js:1544:5)</pre></details>
+                <details class="con con-lvl-warn"><summary><span class="act-time dim">09:45:10</span><svg class="ic"><use href="#i-alert-triangle"/></svg><span class="con-msg" title='Each child in a list should have a unique "key" prop. Check the render method of PositionsGrid.'>Each child in a list should have a unique "key" prop. Check the render method of PositionsGrid.</span><span class="badge badge-xs badge-light c-gray">×8</span><svg class="ic con-chev"><use href="#i-chevron-right"/></svg></summary>
+                  <pre class="con-stack">at PositionsGrid (positions/remoteEntry.js:3310:5)</pre></details>
+                <details class="con con-lvl-error"><summary><span class="act-time">10:09:40</span><svg class="ic" style="color:var(--sr-danger)"><use href="#i-circle-x"/></svg><span class="con-msg" title="Cancel failed: network error (orderId o-1783)">Cancel failed: network error (orderId o-1783)</span><span></span><svg class="ic con-chev"><use href="#i-chevron-right"/></svg></summary>
+                  <div class="pn-note c-gray" style="border:0"><svg class="ic"><use href="#i-info-circle"/></svg><span>The stack loads with this part of the recording. <a href="#">Go to 10:09:40</a></span></div></details>
+              </div>
+            </div>
+
+            <!-- Network panel: table of requests. Status 0 shows "Failed". -->
+            <div class="fl-panel" data-panel="network" hidden>
+              <div class="pn-tools">
+                <button class="chip" type="button" data-toggle aria-pressed="false"><svg class="ic chip-check"><use href="#i-check"/></svg>Failed only</button>
+                <span class="field" style="max-width:220px;margin-left:auto"><svg class="ic field-ic"><use href="#i-search"/></svg><input class="input" placeholder="Filter by URL" aria-label="Filter requests"></span>
+              </div>
+              <div class="pn-note"><svg class="ic"><use href="#i-info-circle"/></svg><span>All requests: 09:02–09:38 loaded. Failed requests: whole session.</span></div>
+              <div class="pn-scroll">
+                <table class="tbl">
+                  <thead><tr><th>Time</th><th>Method</th><th>Status</th><th>URL</th><th class="r">Duration</th></tr></thead>
+                  <tbody>
+                    <tr><td class="dim">09:02:15</td><td>GET</td><td>200</td><td class="url">/api/session</td><td class="r">84 ms</td></tr>
+                    <tr><td class="dim">09:02:16</td><td>GET</td><td>200</td><td class="url">/api/orders?status=open</td><td class="r">132 ms</td></tr>
+                    <tr><td class="dim">09:02:16</td><td>GET</td><td>200</td><td class="url">/api/positions</td><td class="r">210 ms</td></tr>
+                    <tr><td class="dim">09:23:55</td><td>POST</td><td>201</td><td class="url">/api/orders</td><td class="r">188 ms</td></tr>
+                    <tr><td class="dim">09:24:04</td><td>GET</td><td>200</td><td class="url">/api/positions?book=EQ-NA</td><td class="r">342 ms</td></tr>
+                    <tr class="is-danger"><td>09:26:07</td><td>POST</td><td><svg class="ic ic-12" style="vertical-align:-2px"><use href="#i-circle-x"/></svg> 500</td><td class="url">/api/orders/o-1783/amend</td><td class="r">1,204 ms</td></tr>
+                    <tr><td class="dim">09:26:09</td><td>GET</td><td>200</td><td class="url">/api/orders?status=open</td><td class="r">97 ms</td></tr>
+                    <tr class="is-danger"><td>10:09:32</td><td>DELETE</td><td><svg class="ic ic-12" style="vertical-align:-2px"><use href="#i-circle-x"/></svg> Failed</td><td class="url">/api/orders/o-1783</td><td class="r">30,001 ms</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <div class="fl-splitter v" aria-hidden="true"></div>
+
+      <!-- ═══ RIGHT COLUMN (weight 36): Actions over State · Diff · Info ═══ -->
+      <div class="fl-col" style="--wt:36">
+
+        <!-- ─── Tabset ts-actions ─── -->
+        <section class="fl-tabset" data-tabset style="--wt:58" aria-label="Actions">
+          <div class="fl-strip">
+            <div class="fl-tabs" role="tablist">
+              <div class="fl-tab" role="tab" tabindex="0" aria-selected="true" data-tab="actions" title="Clicks, inputs, navigation, errors, requests and state changes, in order">Actions<button class="fl-x" type="button" tabindex="-1" aria-label="Close Actions"><svg class="ic"><use href="#i-x"/></svg></button></div>
+            </div>
+            <div class="fl-toolbar"><button class="fl-tb" type="button" data-maximize aria-pressed="false" aria-label="Maximise this tabset"><svg class="ic ic-max"><use href="#i-arrows-maximize"/></svg><svg class="ic ic-min"><use href="#i-arrows-minimize"/></svg></button></div>
+          </div>
+          <div class="fl-body">
+            <div class="fl-panel" data-panel="actions">
+              <!-- Toolbar: search (/) + Following toggle, then the kind chips. State is ON here (the viewer turned it on; default is off). -->
+              <div class="pn-tools">
+                <span class="field"><svg class="ic field-ic"><use href="#i-search"/></svg><input class="input" placeholder="Search actions" aria-label="Search actions"><span class="field-end"><span class="kbd" style="min-width:16px;line-height:14px">/</span></span></span>
+                <button class="btn btn-default" type="button" data-toggle aria-pressed="true" data-tip="Follow the play head (F). Scrolling the list turns it off." data-tip-pos="bottom-end"><svg class="ic"><use href="#i-player-play"/></svg>Following</button>
+                <div class="row-flex" style="flex-basis:100%;flex-wrap:wrap;gap:4px">
+                  <button class="chip" type="button" data-toggle aria-pressed="true"><svg class="ic chip-check"><use href="#i-check"/></svg>Clicks</button>
+                  <button class="chip" type="button" data-toggle aria-pressed="true"><svg class="ic chip-check"><use href="#i-check"/></svg>Inputs</button>
+                  <button class="chip" type="button" data-toggle aria-pressed="true"><svg class="ic chip-check"><use href="#i-check"/></svg>Navigation</button>
+                  <button class="chip" type="button" data-toggle aria-pressed="true"><svg class="ic chip-check"><use href="#i-check"/></svg>Errors</button>
+                  <button class="chip" type="button" data-toggle aria-pressed="true"><svg class="ic chip-check"><use href="#i-check"/></svg>Requests: failed<svg class="ic ic-12"><use href="#i-chevron-down"/></svg></button>
+                  <button class="chip" type="button" data-toggle aria-pressed="true"><svg class="ic chip-check"><use href="#i-check"/></svg>State</button>
+                  <button class="chip" type="button" data-toggle aria-pressed="true"><svg class="ic chip-check"><use href="#i-check"/></svg>Console: error, warn<svg class="ic ic-12"><use href="#i-chevron-down"/></svg></button>
+                  <button class="chip" type="button" data-toggle aria-pressed="true"><svg class="ic chip-check"><use href="#i-check"/></svg>Gaps</button>
+                  <button class="chip" type="button" data-toggle aria-pressed="true"><svg class="ic chip-check"><use href="#i-check"/></svg>Reports</button>
+                  <button class="chip" type="button" data-toggle aria-pressed="true"><svg class="ic chip-check"><use href="#i-check"/></svg>Hotspots</button>
+                  <button class="btn btn-subtle" type="button">Clear</button>
+                </div>
+              </div>
+              <div class="pn-note"><svg class="ic"><use href="#i-info-circle"/></svg><span>State rows and all requests: 09:02–09:38 loaded.</span></div>
+
+              <!-- Action rows (22 px). The row at the play head (is-current) gets the tint and ▶. -->
+              <div class="pn-scroll" role="list">
+                <div class="act" role="listitem"><span class="act-time">09:02:14</span><span class="act-cur"></span><span class="act-kind"><svg class="ic"><use href="#i-arrow-right"/></svg>nav</span><span class="act-text"><b>/blotter</b> <span>· first page</span></span><span></span></div>
+                <div class="act" role="listitem"><span class="act-time">09:23:40</span><span class="act-cur"></span><span class="act-kind"><svg class="ic"><use href="#i-click"/></svg>click</span><span class="act-text"><b>New order</b> <span>· button.new-order</span></span><span></span></div>
+                <div class="act" role="listitem"><span class="act-time">09:23:44</span><span class="act-cur"></span><span class="act-kind"><svg class="ic"><use href="#i-cursor-text"/></svg>input</span><span class="act-text"><b>Symbol</b> <span>· AAPL</span></span><span></span></div>
+                <div class="act" role="listitem"><span class="act-time">09:23:46</span><span class="act-cur"></span><span class="act-kind"><svg class="ic"><use href="#i-cursor-text"/></svg>input</span><span class="act-text"><b>Side</b> <span>· Buy</span></span><span></span></div>
+                <div class="act" role="listitem"><span class="act-time">09:23:48</span><span class="act-cur"></span><span class="act-kind"><svg class="ic"><use href="#i-cursor-text"/></svg>input</span><span class="act-text"><b>Qty</b> <span>· 100</span></span><span></span></div>
+                <div class="act" role="listitem"><span class="act-time">09:23:51</span><span class="act-cur"></span><span class="act-kind"><svg class="ic"><use href="#i-cursor-text"/></svg>input</span><span class="act-text"><b>Limit</b> <span>· 228.40</span></span><span></span></div>
+                <div class="act" role="listitem"><span class="act-time">09:23:55</span><span class="act-cur"></span><span class="act-kind"><svg class="ic"><use href="#i-click"/></svg>click</span><span class="act-text"><b>Submit</b> <span>· .order-form button.submit</span></span><span></span></div>
+                <div class="act" role="listitem"><span class="act-time">09:23:55</span><span class="act-cur"></span><span class="act-kind"><svg class="ic"><use href="#i-database"/></svg>state</span><span class="act-text"><b>orders/submitPending</b> <span>· orders/redux#1</span></span><span></span></div>
+                <div class="act" role="listitem"><span class="act-time">09:23:56</span><span class="act-cur"></span><span class="act-kind"><svg class="ic"><use href="#i-database"/></svg>state</span><span class="act-text"><b>orders/placed</b> <span>· orders/redux#1</span></span><span></span></div>
+                <div class="act" role="listitem"><span class="act-time">09:24:03</span><span class="act-cur"></span><span class="act-kind"><svg class="ic"><use href="#i-arrow-right"/></svg>nav</span><span class="act-text"><b>/positions</b> <span>· positions remote</span></span><span></span></div>
+                <div class="act" role="listitem"><span class="act-time">09:24:08</span><span class="act-cur"></span><span class="act-kind"><svg class="ic"><use href="#i-terminal-2"/></svg>console</span><span class="act-text" title="AMPS: slow consumer on positions_v2 (1,200 messages queued)"><b>AMPS: slow consumer on positions_v2</b> <span>(1,200 messages queued)</span></span><span class="badge badge-xs badge-light c-gray">×4</span></div>
+                <div class="act is-current" role="listitem" aria-current="true"><span class="act-time">09:24:10</span><span class="act-cur"><svg class="ic ic-f ic-8"><use href="#i-f-player-play"/></svg></span><span class="act-kind"><svg class="ic"><use href="#i-texture"/></svg>gap</span><span class="act-text"><b>Paused</b> <span>· app busy · .positions [data-sr-grid=positions] .ag-body</span></span><span></span></div>
+                <div class="act" role="listitem"><span class="act-time">09:25:52</span><span class="act-cur"></span><span class="act-kind"><svg class="ic"><use href="#i-texture"/></svg>gap</span><span class="act-text"><b>Recording resumed</b> <span>· after 1m 42s</span></span><span></span></div>
+                <div class="act" role="listitem"><span class="act-time">09:26:04</span><span class="act-cur"></span><span class="act-kind"><svg class="ic"><use href="#i-click"/></svg>click</span><span class="act-text"><b>Amend</b> <span>· button.amend</span></span><span></span></div>
+                <div class="act" role="listitem"><span class="act-time">09:26:06</span><span class="act-cur"></span><span class="act-kind"><svg class="ic"><use href="#i-cursor-text"/></svg>input</span><span class="act-text"><b>Qty</b> <span>· 150</span></span><span></span></div>
+                <div class="act is-danger" role="listitem"><span class="act-time">09:26:07</span><span class="act-cur"></span><span class="act-kind"><svg class="ic"><use href="#i-circle-x"/></svg>request</span><span class="act-text"><b>POST 500</b> <span>· /api/orders/o-1783/amend · 1,204 ms</span></span><span></span></div>
+                <div class="act is-danger" role="listitem"><span class="act-time">09:26:07</span><span class="act-cur"></span><span class="act-kind"><svg class="ic"><use href="#i-terminal-2"/></svg>console</span><span class="act-text"><b>Amend failed: 500 Internal Server Error</b> <span>(orderId o-1783)</span></span><span></span></div>
+                <div class="act is-danger" role="listitem"><span class="act-time">09:26:08</span><span class="act-cur"></span><span class="act-kind"><svg class="ic"><use href="#i-alert-triangle"/></svg>error</span><span class="act-text" title="TypeError: Cannot read properties of undefined (reading 'fills')"><b>TypeError</b> <span>· Cannot read properties of undefined (reading 'fills')</span></span><span class="badge badge-xs badge-light c-gray">×2</span></div>
+                <div class="act" role="listitem"><span class="act-time">09:26:15</span><span class="act-cur"></span><span class="act-kind"><svg class="ic"><use href="#i-flag"/></svg>report</span><span class="act-text"><b>Order stuck in pending</b> <span>· user report</span></span><span></span></div>
+                <div class="act" role="listitem"><span class="act-time">09:45:10</span><span class="act-cur"></span><span class="act-kind"><svg class="ic"><use href="#i-terminal-2"/></svg>console</span><span class="act-text"><b>Each child in a list should have a unique "key" prop.</b> <span>Check the render method of PositionsGrid.</span></span><span class="badge badge-xs badge-light c-gray">×8</span></div>
+                <div class="act" role="listitem"><span class="act-time">10:09:31</span><span class="act-cur"></span><span class="act-kind"><svg class="ic"><use href="#i-click"/></svg>click</span><span class="act-text"><b>Cancel order</b> <span>· button.cancel</span></span><span></span></div>
+                <div class="act is-danger" role="listitem"><span class="act-time">10:09:32</span><span class="act-cur"></span><span class="act-kind"><svg class="ic"><use href="#i-circle-x"/></svg>request</span><span class="act-text"><b>DELETE Failed</b> <span>· /api/orders/o-1783 · 30,001 ms</span></span><span></span></div>
+                <div class="act is-danger" role="listitem"><span class="act-time">10:09:40</span><span class="act-cur"></span><span class="act-kind"><svg class="ic"><use href="#i-terminal-2"/></svg>console</span><span class="act-text"><b>Cancel failed: network error</b> <span>(orderId o-1783)</span></span><span></span></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <div class="fl-splitter h" aria-hidden="true"></div>
+
+        <!-- ─── Tabset ts-state: State (selected) · Diff · Info. The pointer-active tabset gets the accent bar. ─── -->
+        <section class="fl-tabset is-active" data-tabset style="--wt:42" aria-label="State, Diff and Info">
+          <div class="fl-strip">
+            <div class="fl-tabs" role="tablist">
+              <div class="fl-tab" role="tab" tabindex="0" aria-selected="true" data-tab="state" title="Redux state at the play head">State<button class="fl-x" type="button" tabindex="-1" aria-label="Close State"><svg class="ic"><use href="#i-x"/></svg></button></div>
+              <div class="fl-tab" role="tab" tabindex="0" aria-selected="false" data-tab="diff" title="What the last Redux action changed">Diff<button class="fl-x" type="button" tabindex="-1" aria-label="Close Diff"><svg class="ic"><use href="#i-x"/></svg></button></div>
+              <div class="fl-tab" role="tab" tabindex="0" aria-selected="false" data-tab="info" title="Session details, recordings, gaps and legend">Info<button class="fl-x" type="button" tabindex="-1" aria-label="Close Info"><svg class="ic"><use href="#i-x"/></svg></button></div>
+            </div>
+            <div class="fl-toolbar"><button class="fl-tb" type="button" data-maximize aria-pressed="false" aria-label="Maximise this tabset"><svg class="ic ic-max"><use href="#i-arrows-maximize"/></svg><svg class="ic ic-min"><use href="#i-arrows-minimize"/></svg></button></div>
+          </div>
+          <div class="fl-body">
+
+            <!-- State: store picker + filter, "At" line, JSON tree (<details> expand without JS). • marks keys the current action changed. -->
+            <div class="fl-panel" data-panel="state">
+              <div class="pn-tools">
+                <span class="xs dim b6">Store</span>
+                <button class="input select" type="button" style="width:150px" aria-label="Store"><span>orders/redux#1</span><svg class="ic"><use href="#i-chevron-down"/></svg></button>
+                <span class="field" style="min-width:100px"><svg class="ic field-ic"><use href="#i-search"/></svg><input class="input" placeholder="Filter keys" aria-label="Filter keys"></span>
+              </div>
+              <div class="pn-note"><span class="grow">At 09:24:58 EST · after <b class="b5" style="color:var(--mantine-color-text)">orders/placed</b></span></div>
+              <div class="pn-scroll">
+                <details class="jt" open><summary class="jt-row"><svg class="ic jt-chev"><use href="#i-chevron-right"/></svg><span class="jt-key">orders</span><span class="jt-meta">{2 keys}</span></summary>
+                  <div class="jt-kids">
+                    <details class="jt"><summary class="jt-row"><svg class="ic jt-chev"><use href="#i-chevron-right"/></svg><span class="jt-key">o-1782</span><span class="jt-meta">{7 keys}</span></summary>
+                      <div class="jt-kids">
+                        <div class="jt-row"><span class="jt-pad"></span><span class="jt-key">id</span><span class="jt-str">"o-1782"</span></div>
+                        <div class="jt-row"><span class="jt-pad"></span><span class="jt-key">symbol</span><span class="jt-str">"MSFT"</span></div>
+                        <div class="jt-row"><span class="jt-pad"></span><span class="jt-key">side</span><span class="jt-str">"Sell"</span></div>
+                        <div class="jt-row"><span class="jt-pad"></span><span class="jt-key">qty</span><span class="jt-num">300</span></div>
+                        <div class="jt-row"><span class="jt-pad"></span><span class="jt-key">price</span><span class="jt-num">431.15</span></div>
+                        <div class="jt-row"><span class="jt-pad"></span><span class="jt-key">status</span><span class="jt-str">"filled"</span></div>
+                        <div class="jt-row"><span class="jt-pad"></span><span class="jt-key">fills</span><span class="jt-meta" style="margin-left:6px">[1 item]</span></div>
+                      </div></details>
+                    <details class="jt" open><summary class="jt-row"><svg class="ic jt-chev"><use href="#i-chevron-right"/></svg><span class="jt-key">o-1783</span><span class="jt-chg" data-tip="Changed by orders/placed" tabindex="0">•</span><span class="jt-meta">{7 keys}</span></summary>
+                      <div class="jt-kids">
+                        <div class="jt-row"><span class="jt-pad"></span><span class="jt-key">id</span><span class="jt-str">"o-1783"</span></div>
+                        <div class="jt-row"><span class="jt-pad"></span><span class="jt-key">symbol</span><span class="jt-str">"AAPL"</span></div>
+                        <div class="jt-row"><span class="jt-pad"></span><span class="jt-key">side</span><span class="jt-str">"Buy"</span></div>
+                        <div class="jt-row"><span class="jt-pad"></span><span class="jt-key">qty</span><span class="jt-num">100</span></div>
+                        <div class="jt-row"><span class="jt-pad"></span><span class="jt-key">price</span><span class="jt-num">228.4</span></div>
+                        <div class="jt-row"><span class="jt-pad"></span><span class="jt-key">status</span><span class="jt-chg" data-tip="Changed by orders/placed" tabindex="0">•</span><span class="jt-str">"pending"</span></div>
+                        <div class="jt-row"><span class="jt-pad"></span><span class="jt-key">fills</span><span class="jt-meta" style="margin-left:6px">[ ] 0 items</span></div>
+                      </div></details>
+                  </div></details>
+                <details class="jt"><summary class="jt-row"><svg class="ic jt-chev"><use href="#i-chevron-right"/></svg><span class="jt-key">filters</span><span class="jt-meta">{2 keys}</span></summary>
+                  <div class="jt-kids">
+                    <div class="jt-row"><span class="jt-pad"></span><span class="jt-key">status</span><span class="jt-str">"open"</span></div>
+                    <div class="jt-row"><span class="jt-pad"></span><span class="jt-key">book</span><span class="jt-str">"EQ-NA"</span></div>
+                  </div></details>
+                <div class="jt-row"><span class="jt-pad"></span><span class="jt-key">lastOrderId</span><span class="jt-chg" data-tip="Changed by orders/placed" tabindex="0">•</span><span class="jt-str">"o-1783"</span></div>
+                <div class="jt-row"><span class="jt-pad"></span><span class="jt-key">blotterCache</span><span class="badge badge-xs jt-chip" style="text-transform:none;font-weight:500">not recorded · over 256 KB: 1.4 MB</span></div>
+                <div class="jt-row"><span class="jt-pad"></span><span class="jt-key">marketData</span><span class="badge badge-xs jt-chip" style="text-transform:none;font-weight:500">not recorded · deny-listed for volume</span></div>
+              </div>
+              <div class="pn-foot"><svg class="ic"><use href="#i-info-circle"/></svg><span>React useState values aren't captured. The screen shows them.</span></div>
+            </div>
+
+            <!-- Diff: what the last Redux action changed. Changes | Payload switch uses radio inputs + :has() (page style). -->
+            <div class="fl-panel" data-panel="diff" hidden>
+              <div class="pn-tools" style="justify-content:space-between">
+                <span class="sm trunc"><b class="b6">orders/placed</b> <span class="dim">· orders/redux#1 · 09:23:56.412</span></span>
+                <div class="seg" role="radiogroup" aria-label="Diff view">
+                  <label class="seg-i"><input type="radio" name="dv" id="dv-changes" checked><span>Changes</span></label>
+                  <label class="seg-i"><input type="radio" name="dv" id="dv-payload"><span>Payload</span></label>
+                </div>
+              </div>
+              <div class="pn-scroll">
+                <div class="dv-changes">
+                  <div class="df df-chg"><span class="df-sign">~</span><span><span class="df-path">orders.o-1783.status</span> <span class="df-val">"submitting" <span class="df-arrow">→</span> "pending"</span></span></div>
+                  <div class="df df-chg"><span class="df-sign">~</span><span><span class="df-path">lastOrderId</span> <span class="df-val">"o-1782" <span class="df-arrow">→</span> "o-1783"</span></span></div>
+                </div>
+                <div class="dv-payload"><pre class="con-stack" style="padding:8px 12px;white-space:pre-wrap;background:none;color:var(--mantine-color-text)">{
+  "type": "orders/placed",
+  "payload": { "orderId": "o-1783", "status": "pending" }
+}</pre></div>
+              </div>
+              <div class="pn-foot"><svg class="ic"><use href="#i-info-circle"/></svg><span>Legend: <b class="df-sign" style="color:var(--sr-success-text)">+</b> added · <b class="df-sign" style="color:var(--sr-danger-text)">−</b> removed · <b class="df-sign">~</b> changed</span></div>
+            </div>
+
+            <!-- Info: session facts, integrity, recordings, known gaps, rate caps, legend, files. -->
+            <div class="fl-panel" data-panel="info" hidden>
+              <div class="pn-scroll">
+                <section class="sec"><h3 class="sec-h">Session</h3>
+                  <dl class="kv">
+                    <dt>Id</dt><dd class="mono">01JCB7Q3V7MX4T2R</dd>
+                    <dt>User</dt><dd>u123 <span class="badge badge-xs" style="margin-left:4px">client-asserted</span></dd>
+                    <dt>App</dt><dd>blotter 4.2.1</dd>
+                    <dt>Remotes</dt><dd>orders 3.8.0 · pricing 2.14.2 · positions 1.9.0</dd>
+                    <dt>Browser</dt><dd>Chrome 131 on Windows · viewport 2560×1400</dd>
+                    <dt>Region</dt><dd>NAM</dd>
+                    <dt>Time zone</dt><dd>America/New_York (EST, UTC−5)</dd>
+                    <dt>When</dt><dd>Mon 10 Nov 2026 · 09:02:14–10:14:51 EST · 1h 12m</dd>
+                  </dl></section>
+                <section class="sec"><h3 class="sec-h">Integrity</h3>
+                  <div class="note note-ok" style="white-space:normal"><svg class="ic"><use href="#i-check"/></svg><span><b class="b6">Unchanged since received.</b> <span class="dim">All 38 chunks read so far matched their sha256. That shows nothing changed after the server received them. It doesn't show who sent them.</span></span></div></section>
+                <section class="sec"><h3 class="sec-h">Recordings</h3>
+                  <table class="tbl" style="border:1px solid var(--sr-divider)">
+                    <thead><tr><th>#</th><th>Time (EST)</th><th>Closed</th><th>Notes</th></tr></thead>
+                    <tbody>
+                      <tr><td>R1</td><td>09:02:14–09:38:05</td><td>clean, page hide</td><td class="dim">gap seq 41–43 · offset +1.2 s</td></tr>
+                      <tr><td>R2</td><td>09:38:11–09:51:30</td><td>no clean close</td><td class="dim">—</td></tr>
+                      <tr><td class="dim">gap</td><td class="dim">09:51:30–10:02:44</td><td class="dim" colspan="2">11 min with no page open</td></tr>
+                      <tr><td>R3</td><td>10:02:44–10:14:51</td><td>clean, logout</td><td class="dim">offset −0.4 s</td></tr>
+                    </tbody></table></section>
+                <section class="sec"><h3 class="sec-h">Known gaps</h3>
+                  <ul style="margin:0;padding-left:16px;font-size:12px;line-height:18px">
+                    <li><b class="b5">Canvas</b> is drawn as a placeholder, not recorded.</li>
+                    <li><b class="b5">Popouts</b> aren't recorded. One was open 09:40:05–09:43:20.</li>
+                    <li><b class="b5">React useState</b> values aren't captured. The screen shows them.</li>
+                    <li><b class="b5">WebSocket traffic</b> isn't recorded. The screen and Redux show what it did.</li>
+                  </ul></section>
+                <section class="sec"><h3 class="sec-h">Rate caps</h3>
+                  <div class="sm"><span class="mono">v2026-11-10.3</span> · positions grid bid, ask, mid at 2/s · pricing ladder last at 4/s</div></section>
+                <section class="sec"><h3 class="sec-h">Legend</h3>
+                  <div class="lg-row"><span class="sw b-pause"></span><b>Paused (app busy)</b><span class="dim">Recording paused to keep the app fast.</span></div>
+                  <div class="lg-row"><span class="sw b-quota"></span><b>Daily quota reached</b><span class="dim">Nothing recorded until 00:00 UTC.</span></div>
+                  <div class="lg-row"><span class="sw b-overflow"></span><b>Upload queue full</b><span class="dim">Oldest parts dropped.</span></div>
+                  <div class="lg-row"><span class="sw b-popout"></span><b>Popout open</b><span class="dim">Popouts aren't recorded.</span></div>
+                  <div class="lg-row"><span class="sw b-hidden"></span><b>Tab hidden</b><span class="dim">Tab stayed in the background too long.</span></div>
+                  <div class="lg-row"><span class="sw b-missing"></span><b>Data missing</b><span class="dim">Batches never arrived.</span></div>
+                  <div class="lg-row"><span class="sw b-unreadable"></span><b>Unreadable</b><span class="dim">Failed its check, or its key was erased.</span></div>
+                  <div class="lg-row"><span class="sw b-slow"></span><b>Slow checkpoints</b><span class="dim">Seeking here is slower.</span></div>
+                  <div class="lg-row"><span class="sw b-nostate"></span><b>No state</b><span class="dim">No Redux state for this remote.</span></div>
+                  <div class="lg-row"><span class="lg-mk mk-note"><svg class="ic ic-f"><use href="#i-m-note"/></svg></span><b>Notes</b><span class="dim">Upload fallback · State key capped · No clean close · Rate caps off · Console cap reached</span></div>
+                  <div class="lg-row"><span class="lg-mk mk-error"><svg class="ic ic-f"><use href="#i-m-error"/></svg></span><b>Error</b><span class="lg-mk mk-fail"><svg class="ic ic-f"><use href="#i-m-fail"/></svg></span><b>Failed request</b><span class="lg-mk mk-report"><svg class="ic ic-f"><use href="#i-m-report"/></svg></span><b>Report</b></div></section>
+                <section class="sec" style="border:0"><h3 class="sec-h">Files</h3>
+                  <table class="tbl" style="border:1px solid var(--sr-divider)">
+                    <thead><tr><th>Recording</th><th class="r">Chunks</th><th class="r">Size</th></tr></thead>
+                    <tbody>
+                      <tr><td>R1 · 09:02–09:38</td><td class="r">38</td><td class="r">51 MB</td></tr>
+                      <tr><td>R2 · 09:38–09:51</td><td class="r">14</td><td class="r">42 MB</td></tr>
+                      <tr><td>R3 · 10:02–10:14</td><td class="r">11</td><td class="r">19 MB</td></tr>
+                    </tbody></table></section>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </main>
+</div>
+</body>
+</html>

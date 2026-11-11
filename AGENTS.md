@@ -29,7 +29,7 @@ Every task comes from a plan file. Start with the master, then your sub-plan:
 | `plan/03-protocol.md` | **Shared contracts:** events (incl. `sr:console`), ingest, config, bridge, query API, `@sr/protocol/secrets`; tasks T1–T2 |
 | `plan/04-recorder.md` | `packages/recorder-engine`, `packages/recorder`; tasks R0–R11 |
 | `plan/05-server.md` | `apps/server`, `deploy/openshift`; tasks S1–S15 |
-| `plan/06-replay-ui.md` | `apps/replay-ui`; tasks U1–U10 |
+| `plan/06-replay-ui.md` | `apps/replay-ui` (flexlayout workspace, Mantine 9, light/dark, Vite + React Compiler); tasks U0–U11 |
 | `plan/07-state-plugin.md` | `packages/state-plugin`, `fixtures/apps`; tasks PL0–PL7 |
 | `plan/08-integration.md` | How-to guide for the real workspace; tasks I1–I6 (I6: post-MVP grid data log spike) |
 | `plan/09-analytics.md` | **MVP2:** analytics infrastructure: facts at ingest, `analytics.db`, backfill, `$dom` probe, query API + CLI; tasks AN0–AN5, AN7 |
@@ -41,11 +41,12 @@ stop and ask.
 
 | Folder | What lives there |
 |---|---|
-| `apps/` | `server` (Bun + Hono + SQLite; also serves the replay UI), `replay-ui` (TanStack Router SPA). |
+| `apps/` | `server` (Bun + Hono + SQLite; also serves the replay UI), `replay-ui` (TanStack Router SPA: Mantine 9, flexlayout-react, React Compiler, built with Vite). |
 | `packages/` | `protocol` (shared zod contracts; entries `.`, `/publish` and `/secrets`, the last two with no imports), `recorder-engine` (the only rrweb importer), `recorder` (browser recorder), `state-plugin` (unplugin build plugin). |
 | `fixtures/apps/` | Apps that imitate the real workspace, for tests. |
 | `deploy/openshift/` | Per-region manifests. |
 | `docs/integration/`, `examples/` | Integration guide material. |
+| `docs/design/replay-ui/` | Static HTML mocks of the replay UI, light and dark (06 U0). Open `index.html` from disk. Never published. |
 | `e2e/` | Gate-2 browser specs and their host page (task X2); `e2e/analytics/` in MVP2. |
 | `spike/` | Throwaway experiments. Never imported by `apps/` or `packages/`. |
 | `plan/` | Plan files. **Only the lead/planning session edits them**; coding agents report changes instead. |
@@ -59,6 +60,8 @@ stop and ask.
 - Type-check / tests: `bunx tsc --noEmit` and `bun test` (set up in batch B1).
 
 **Tooling:** use Bun, never Node: `bun`, `bunx`, `bun add`, `bun test`. Node isn't on the PATH.
+The one exception to Bun's bundler is `apps/replay-ui`, which builds with **Vite run under Bun**
+(`bun --bun vite`; 06 L1), because React Compiler needs it in dev.
 
 ## Hard rules
 

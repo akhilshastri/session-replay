@@ -1,0 +1,701 @@
+/*
+ * mock.css — shared styles for the Session Replay UI design mocks (plan 06, task U0).
+ *
+ * Owns: the design tokens (Mantine 9 default palette + the spec's `--sr-*` AA overrides, light and
+ * dark), Mantine-like controls at the compact sizes, the flexlayout chrome, the scrubber (bands,
+ * markers, play head), the recorded-screen stand-in, and the list / tree / table row styles.
+ * Fits in: every page in this folder links it, and `mock.js` adds the behaviour (theme, tabs,
+ * pop-ups, variants, icon sprite). Pages should need almost no style of their own.
+ * Main dependents: index.html, 00-tokens.html, 03-replay-playing.html and the later mocks 01-09.
+ *
+ * The theme switches with `data-mantine-color-scheme="light|dark"` on <html>. The token blocks
+ * match ANY element with that attribute, so 00-tokens.html can show both themes side by side.
+ * Mantine variable names are kept (`--mantine-color-body` ...) so the real build maps 1:1.
+ *
+ * Sections: 1 tokens · 2 base · 3 controls · 4 pop-ups · 5 app shell · 6 flexlayout chrome ·
+ *           7 panel parts · 8 lists, trees, tables · 9 player · 10 bands · 11 mock-only pieces
+ */
+
+/* ───────────────────────── 1. Tokens ───────────────────────── */
+
+:root {
+  /* Mantine default palettes (DEFAULT_THEME.colors) — the same in both themes. */
+  --mantine-color-white: #fff;
+  --mantine-color-black: #000;
+  --mantine-color-gray-0: #f8f9fa; --mantine-color-gray-1: #f1f3f5; --mantine-color-gray-2: #e9ecef;
+  --mantine-color-gray-3: #dee2e6; --mantine-color-gray-4: #ced4da; --mantine-color-gray-5: #adb5bd;
+  --mantine-color-gray-6: #868e96; --mantine-color-gray-7: #495057; --mantine-color-gray-8: #343a40;
+  --mantine-color-gray-9: #212529;
+  --mantine-color-dark-0: #c9c9c9; --mantine-color-dark-1: #b8b8b8; --mantine-color-dark-2: #828282;
+  --mantine-color-dark-3: #696969; --mantine-color-dark-4: #424242; --mantine-color-dark-5: #3b3b3b;
+  --mantine-color-dark-6: #2e2e2e; --mantine-color-dark-7: #242424; --mantine-color-dark-8: #1f1f1f;
+  --mantine-color-dark-9: #141414;
+  --mantine-color-blue-0: #e7f5ff; --mantine-color-blue-1: #d0ebff; --mantine-color-blue-2: #a5d8ff;
+  --mantine-color-blue-3: #74c0fc; --mantine-color-blue-4: #4dabf7; --mantine-color-blue-5: #339af0;
+  --mantine-color-blue-6: #228be6; --mantine-color-blue-7: #1c7ed6; --mantine-color-blue-8: #1971c2;
+  --mantine-color-blue-9: #1864ab;
+  --mantine-color-red-0: #fff5f5; --mantine-color-red-1: #ffe3e3; --mantine-color-red-2: #ffc9c9;
+  --mantine-color-red-3: #ffa8a8; --mantine-color-red-4: #ff8787; --mantine-color-red-5: #ff6b6b;
+  --mantine-color-red-6: #fa5252; --mantine-color-red-7: #f03e3e; --mantine-color-red-8: #e03131;
+  --mantine-color-red-9: #c92a2a;
+  --mantine-color-yellow-0: #fff9db; --mantine-color-yellow-1: #fff3bf; --mantine-color-yellow-2: #ffec99;
+  --mantine-color-yellow-3: #ffe066; --mantine-color-yellow-4: #ffd43b; --mantine-color-yellow-5: #fcc419;
+  --mantine-color-yellow-6: #fab005; --mantine-color-yellow-7: #f59f00; --mantine-color-yellow-8: #f08c00;
+  --mantine-color-yellow-9: #e67700;
+  --mantine-color-orange-0: #fff4e6; --mantine-color-orange-1: #ffe8cc; --mantine-color-orange-2: #ffd8a8;
+  --mantine-color-orange-3: #ffc078; --mantine-color-orange-4: #ffa94d; --mantine-color-orange-5: #ff922b;
+  --mantine-color-orange-6: #fd7e14; --mantine-color-orange-7: #f76707; --mantine-color-orange-8: #e8590c;
+  --mantine-color-orange-9: #d9480f;
+  --mantine-color-violet-0: #f3f0ff; --mantine-color-violet-1: #e5dbff; --mantine-color-violet-2: #d0bfff;
+  --mantine-color-violet-3: #b197fc; --mantine-color-violet-4: #9775fa; --mantine-color-violet-5: #845ef7;
+  --mantine-color-violet-6: #7950f2; --mantine-color-violet-7: #7048e8; --mantine-color-violet-8: #6741d9;
+  --mantine-color-violet-9: #5f3dc4;
+  --mantine-color-teal-3: #63e6be; --mantine-color-teal-4: #38d9a9; --mantine-color-teal-9: #087f5b;
+  --mantine-color-green-4: #69db7c; --mantine-color-green-8: #2f9e44;
+  --mantine-color-cyan-4: #3bc9db; --mantine-color-cyan-8: #0c8599;
+
+  /* Theme overrides that are not scheme-specific (spec §4 "Type, spacing, density"). */
+  --mantine-font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mantine-font-family-monospace: "Cascadia Mono", Consolas, ui-monospace, Menlo, monospace;
+  --mantine-font-size-xs: 11px; --mantine-font-size-sm: 12px; --mantine-font-size-md: 13px;
+  --mantine-font-size-lg: 15px; --mantine-font-size-xl: 18px;
+  --mantine-spacing-xs: 4px; --mantine-spacing-sm: 8px; --mantine-spacing-md: 12px;
+  --mantine-spacing-lg: 16px; --mantine-spacing-xl: 24px;
+  --mantine-radius-xs: 2px; --mantine-radius-sm: 3px; --mantine-radius-md: 6px;
+  --input-height-xs: 24px; --input-height-sm: 30px;
+}
+
+/* Light — also the default when <html> has no attribute yet. */
+:root,
+[data-mantine-color-scheme="light"] {
+  color-scheme: light;
+  --sr-ground: var(--mantine-color-gray-2);
+  --mantine-color-body: #fff;
+  --sr-chrome: var(--mantine-color-gray-0);
+  --sr-hover: var(--mantine-color-gray-1);
+  --sr-pressed: var(--mantine-color-gray-2);
+  --sr-stage: var(--mantine-color-gray-3);
+  --sr-divider: var(--mantine-color-gray-3);
+  --mantine-color-default-border: var(--mantine-color-gray-4);
+  --sr-control-border: var(--mantine-color-gray-6);
+  --mantine-color-text: var(--mantine-color-gray-9);
+  --mantine-color-dimmed: var(--mantine-color-gray-7);
+  --sr-disabled: var(--mantine-color-gray-5);
+  --sr-primary-filled: var(--mantine-color-blue-8);
+  --sr-primary-filled-hover: var(--mantine-color-blue-9);
+  --sr-accent-text: var(--mantine-color-blue-8);
+  --sr-accent-tint: var(--mantine-color-blue-0);
+  --mantine-primary-color-light-color: var(--mantine-color-blue-9);
+  --sr-focus: var(--mantine-color-blue-8);
+  --mantine-color-error: var(--mantine-color-red-9);
+  --sr-danger-text: var(--mantine-color-red-9);
+  --sr-danger: var(--mantine-color-red-6);
+  --sr-danger-tint: var(--mantine-color-red-0);
+  --sr-warning-icon: var(--mantine-color-orange-9);
+  --sr-warning-tint: var(--mantine-color-yellow-0);
+  --sr-success-icon: var(--mantine-color-green-8);
+  --sr-success-text: var(--mantine-color-teal-9);
+  --sr-json-num: var(--mantine-color-blue-8);
+  --sr-json-bool: var(--mantine-color-violet-9);
+  --sr-track: var(--mantine-color-gray-3);
+  --sr-track-played: var(--mantine-color-gray-5);
+  --sr-loaded: var(--mantine-color-blue-6);
+  --sr-scrim: rgba(33, 37, 41, .45);
+  --sr-tip-bg: var(--mantine-color-gray-9);
+  --sr-tip-fg: #fff;
+  --mantine-shadow-md: 0 1px 3px rgba(0, 0, 0, .05), rgba(0, 0, 0, .05) 0 20px 25px -5px, rgba(0, 0, 0, .04) 0 10px 10px -5px;
+  --mantine-shadow-xs: 0 1px 3px rgba(0, 0, 0, .05), 0 1px 2px rgba(0, 0, 0, .1);
+  /* Colour families for badges, light buttons and alerts: --bg tint, --fg text, --ink stripe. */
+  --fam-red-bg: var(--mantine-color-red-0);    --fam-red-fg: var(--mantine-color-red-9);     --fam-red-ink: var(--mantine-color-red-6);
+  --fam-yellow-bg: var(--mantine-color-yellow-0); --fam-yellow-fg: var(--mantine-color-gray-9); --fam-yellow-ink: var(--mantine-color-orange-9);
+  --fam-violet-bg: var(--mantine-color-violet-1); --fam-violet-fg: var(--mantine-color-violet-9); --fam-violet-ink: var(--mantine-color-violet-7);
+  --fam-gray-bg: var(--mantine-color-gray-1);  --fam-gray-fg: var(--mantine-color-gray-9);  --fam-gray-ink: var(--mantine-color-gray-6);
+  --fam-blue-bg: var(--mantine-color-blue-0);  --fam-blue-fg: var(--mantine-color-blue-9);  --fam-blue-ink: var(--mantine-color-blue-8);
+  /* Scrubber band families (fill / ink). */
+  --band-amber-fill: var(--mantine-color-yellow-1);  --band-amber-ink: var(--mantine-color-orange-9);
+  --band-violet-fill: var(--mantine-color-violet-1); --band-violet-ink: var(--mantine-color-violet-7);
+  --band-gray-fill: var(--mantine-color-gray-1);     --band-gray-ink: var(--mantine-color-gray-7);
+  --band-red-fill: var(--mantine-color-red-1);       --band-red-ink: var(--mantine-color-red-9);
+  --band-slow-ink: var(--mantine-color-cyan-8);      --band-nostate-ink: var(--mantine-color-gray-7);
+}
+
+[data-mantine-color-scheme="dark"] {
+  color-scheme: dark;
+  --sr-ground: var(--mantine-color-dark-9);
+  --mantine-color-body: var(--mantine-color-dark-7);
+  --sr-chrome: var(--mantine-color-dark-8);
+  --sr-hover: var(--mantine-color-dark-6);
+  --sr-pressed: var(--mantine-color-dark-5);
+  --sr-stage: var(--mantine-color-dark-9);
+  --sr-divider: var(--mantine-color-dark-5);
+  --mantine-color-default-border: var(--mantine-color-dark-4);
+  --sr-control-border: var(--mantine-color-dark-2);
+  --mantine-color-text: var(--mantine-color-gray-2);
+  --mantine-color-dimmed: var(--mantine-color-dark-1);
+  --sr-disabled: var(--mantine-color-dark-3);
+  --sr-primary-filled: var(--mantine-color-blue-8);
+  --sr-primary-filled-hover: var(--mantine-color-blue-9);
+  --sr-accent-text: var(--mantine-color-blue-4);
+  --sr-accent-tint: #243341;
+  --mantine-primary-color-light-color: var(--mantine-color-blue-4);
+  --sr-focus: var(--mantine-color-blue-4);
+  --mantine-color-error: var(--mantine-color-red-4);
+  --sr-danger-text: var(--mantine-color-red-4);
+  --sr-danger: var(--mantine-color-red-6);
+  --sr-danger-tint: #442b2b;
+  --sr-warning-icon: var(--mantine-color-orange-4);
+  --sr-warning-tint: #44391f;
+  --sr-success-icon: var(--mantine-color-green-4);
+  --sr-success-text: var(--mantine-color-teal-4);
+  --sr-json-num: var(--mantine-color-blue-4);
+  --sr-json-bool: var(--mantine-color-violet-3);
+  --sr-track: var(--mantine-color-dark-5);
+  --sr-track-played: var(--mantine-color-dark-3);
+  --sr-loaded: var(--mantine-color-blue-7);
+  --sr-scrim: rgba(0, 0, 0, .6);
+  --sr-tip-bg: var(--mantine-color-gray-2);
+  --sr-tip-fg: #000;
+  --mantine-shadow-md: 0 1px 3px rgba(0, 0, 0, .3), rgba(0, 0, 0, .35) 0 20px 25px -5px, rgba(0, 0, 0, .3) 0 10px 10px -5px;
+  --mantine-shadow-xs: 0 1px 3px rgba(0, 0, 0, .3), 0 1px 2px rgba(0, 0, 0, .4);
+  --fam-red-bg: #442b2b;    --fam-red-fg: var(--mantine-color-red-4);     --fam-red-ink: var(--mantine-color-red-6);
+  --fam-yellow-bg: #44391f; --fam-yellow-fg: var(--mantine-color-gray-2); --fam-yellow-ink: var(--mantine-color-orange-4);
+  --fam-violet-bg: #332c49; --fam-violet-fg: var(--mantine-color-violet-3); --fam-violet-ink: var(--mantine-color-violet-4);
+  --fam-gray-bg: var(--mantine-color-dark-6); --fam-gray-fg: var(--mantine-color-gray-2); --fam-gray-ink: var(--mantine-color-dark-2);
+  --fam-blue-bg: #243341;   --fam-blue-fg: var(--mantine-color-blue-4);   --fam-blue-ink: var(--mantine-color-blue-4);
+  --band-amber-fill: #44391f;  --band-amber-ink: var(--mantine-color-orange-5);
+  --band-violet-fill: #332c49; --band-violet-ink: var(--mantine-color-violet-4);
+  --band-gray-fill: var(--mantine-color-dark-6); --band-gray-ink: var(--mantine-color-dark-1);
+  --band-red-fill: #4a2c2c;    --band-red-ink: var(--mantine-color-red-5);
+  --band-slow-ink: var(--mantine-color-cyan-4); --band-nostate-ink: var(--mantine-color-dark-1);
+}
+
+/* Colour-family helpers: put one of these on a badge, light button, alert, chip or swatch. */
+.c-red { --c-bg: var(--fam-red-bg); --c-fg: var(--fam-red-fg); --c-ink: var(--fam-red-ink); }
+.c-yellow { --c-bg: var(--fam-yellow-bg); --c-fg: var(--fam-yellow-fg); --c-ink: var(--fam-yellow-ink); }
+.c-violet { --c-bg: var(--fam-violet-bg); --c-fg: var(--fam-violet-fg); --c-ink: var(--fam-violet-ink); }
+.c-gray { --c-bg: var(--fam-gray-bg); --c-fg: var(--fam-gray-fg); --c-ink: var(--fam-gray-ink); }
+.c-blue { --c-bg: var(--fam-blue-bg); --c-fg: var(--fam-blue-fg); --c-ink: var(--fam-blue-ink); }
+
+/* ───────────────────────── 2. Base ───────────────────────── */
+
+*, *::before, *::after { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html { background: var(--sr-ground); }
+body {
+  margin: 0; min-width: 1280px;
+  font: 400 13px/18px var(--mantine-font-family);
+  color: var(--mantine-color-text); background: var(--sr-ground);
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+}
+button, input, select, textarea { font: inherit; color: inherit; }
+button { background: none; border: 0; padding: 0; cursor: pointer; text-align: inherit; }
+a { color: var(--sr-accent-text); text-decoration: none; }
+a:hover { text-decoration: underline; }
+h1, h2, h3, h4, p { margin: 0; }
+code, pre, .mono { font-family: var(--mantine-font-family-monospace); font-size: 12px; }
+pre { margin: 0; }
+:focus-visible, .is-focus { outline: 2px solid var(--sr-focus); outline-offset: 1px; }
+.dim { color: var(--mantine-color-dimmed); }
+.danger { color: var(--sr-danger-text); }
+.sm { font-size: 12px; line-height: 16px; }
+.xs { font-size: 11px; line-height: 14px; }
+.b6 { font-weight: 600; } .b5 { font-weight: 500; }
+.trunc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.grow { flex: 1; min-width: 0; }
+.row-flex { display: flex; align-items: center; gap: 8px; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* Icons: the Tabler sprite is injected by mock.js. Use <svg class="ic"><use href="#i-play"/></svg>.
+   Filled glyphs (f-player-play, m-error ...) take class "ic ic-f". */
+.ic { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; vertical-align: middle; }
+.ic-f { fill: currentColor; stroke: none; }
+.ic-12 { width: 12px; height: 12px; } .ic-14 { width: 14px; height: 14px; } .ic-8 { width: 8px; height: 8px; } .ic-18 { width: 18px; height: 18px; }
+
+/* ───────────────────────── 3. Controls (Mantine look, compact sizes) ───────────────────────── */
+
+/* Button. Default size is Mantine "xs" at 24 px; .btn-sm is the 30 px dialog size.
+   Variants: .btn-filled, .btn-light (+ .c-red ...), .btn-default, .btn-subtle. */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+  height: 24px; padding: 0 10px; border: 1px solid transparent; border-radius: var(--mantine-radius-sm);
+  font-size: 12px; font-weight: 500; line-height: 1; white-space: nowrap; text-align: center;
+  color: var(--mantine-color-text); background: transparent;
+}
+a.btn:hover { text-decoration: none; }
+.btn-sm { height: 30px; padding: 0 14px; font-size: 13px; }
+.btn-filled { background: var(--sr-primary-filled); color: #fff; }
+.btn-filled:hover, .btn-filled.is-hover { background: var(--sr-primary-filled-hover); }
+.btn-light { background: var(--c-bg, var(--fam-blue-bg)); color: var(--c-fg, var(--fam-blue-fg)); }
+.btn-light:hover, .btn-light.is-hover { filter: brightness(.96); }
+.btn-default { background: var(--mantine-color-body); border-color: var(--mantine-color-default-border); }
+.btn-default:hover, .btn-default.is-hover, .btn-subtle:hover, .btn-subtle.is-hover { background: var(--sr-hover); }
+.btn-default[aria-pressed="true"] { background: var(--sr-accent-tint); border-color: var(--sr-accent-text); color: var(--mantine-primary-color-light-color); }
+.btn:disabled, .btn.is-disabled { background: var(--sr-hover); color: var(--sr-disabled); border-color: transparent; cursor: not-allowed; }
+.btn .ic { width: 14px; height: 14px; }
+
+/* ActionIcon. Subtle by default; [aria-pressed=true] shows the accent. */
+.ai {
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+  width: 24px; height: 24px; border-radius: var(--mantine-radius-sm); color: var(--mantine-color-text);
+}
+a.ai:hover { text-decoration: none; }
+.ai-sm { width: 30px; height: 30px; }
+.ai:hover, .ai.is-hover { background: var(--sr-hover); }
+.ai[aria-pressed="true"], .ai.is-on { color: var(--sr-accent-text); }
+.ai:disabled, .ai.is-disabled { color: var(--sr-disabled); cursor: not-allowed; background: none; }
+.ai-default { border: 1px solid var(--mantine-color-default-border); background: var(--mantine-color-body); }
+.ai-light { background: var(--c-bg, var(--fam-blue-bg)); color: var(--c-fg, var(--fam-blue-fg)); }
+
+/* TextInput / Select. Wrap in .field to add a leading icon (.field-ic) or a trailing button (.field-end). */
+.input {
+  display: block; width: 100%; height: 24px; padding: 0 8px;
+  border: 1px solid var(--sr-control-border); border-radius: var(--mantine-radius-sm);
+  background: var(--mantine-color-body); font-size: 12px; line-height: 22px; color: var(--mantine-color-text);
+}
+.input::placeholder { color: var(--mantine-color-dimmed); opacity: 1; }
+.input-sm { height: 30px; font-size: 13px; line-height: 28px; padding: 0 10px; }
+.input:hover, .input.is-hover { border-color: var(--mantine-color-text); }
+.input:focus, .input.is-focus { outline: 2px solid var(--sr-focus); outline-offset: 1px; border-color: var(--sr-focus); }
+.input:disabled, .input.is-disabled { background: var(--sr-hover); color: var(--sr-disabled); border-color: var(--mantine-color-default-border); cursor: not-allowed; }
+.input.is-error { border-color: var(--mantine-color-error); }
+.field { position: relative; display: block; }
+.field-ic { position: absolute; left: 7px; top: 50%; translate: 0 -50%; width: 14px; height: 14px; color: var(--mantine-color-dimmed); pointer-events: none; }
+.field-ic + .input { padding-left: 26px; }
+.field-end { position: absolute; right: 4px; top: 50%; translate: 0 -50%; display: inline-flex; align-items: center; gap: 4px; color: var(--mantine-color-dimmed); }
+.field-end ~ .input { padding-right: 24px; }
+.field-hint { margin-top: 4px; font-size: 11px; line-height: 14px; color: var(--mantine-color-dimmed); }
+.field-err { margin-top: 4px; font-size: 11px; line-height: 14px; color: var(--mantine-color-error); }
+.label { display: block; margin-bottom: 4px; font-size: 13px; font-weight: 500; }
+.select { display: flex; align-items: center; justify-content: space-between; gap: 4px; text-align: left; cursor: pointer; }
+.select .ic { width: 12px; height: 12px; color: var(--mantine-color-dimmed); }
+
+/* Checkbox (size xs, 16 px). */
+.cb { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; cursor: pointer; }
+.cb input {
+  appearance: none; margin: 0; width: 16px; height: 16px; flex: none; position: relative;
+  border: 1px solid var(--sr-control-border); border-radius: var(--mantine-radius-xs); background: var(--mantine-color-body);
+}
+.cb input:checked { background: var(--sr-primary-filled); border-color: var(--sr-primary-filled); }
+.cb input:checked::after { content: ""; position: absolute; left: 4.5px; top: 1.5px; width: 4px; height: 8px; border: solid #fff; border-width: 0 2px 2px 0; rotate: 45deg; }
+.cb input:disabled { background: var(--sr-hover); border-color: var(--mantine-color-default-border); cursor: not-allowed; }
+.cb input:disabled:checked { background: var(--sr-disabled); }
+
+/* Chip: a pill toggle. Unchecked = outline, checked = tinted with a check. Toggle with aria-pressed
+   (mock.js flips it on any [data-toggle]). Reads as a toggle, so use it for filters. */
+.chip {
+  display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 9px; border-radius: 999px;
+  border: 1px solid var(--sr-control-border); background: var(--mantine-color-body);
+  font-size: 12px; font-weight: 500; white-space: nowrap; color: var(--mantine-color-text);
+}
+.chip .ic { width: 12px; height: 12px; }
+.chip .chip-check { display: none; }
+.chip[aria-pressed="true"] { background: var(--sr-accent-tint); border-color: var(--sr-accent-text); color: var(--mantine-primary-color-light-color); }
+.chip[aria-pressed="true"] .chip-check { display: inline-block; }
+.chip:hover, .chip.is-hover { background: var(--sr-hover); }
+.chip[aria-pressed="true"]:hover, .chip[aria-pressed="true"].is-hover { background: var(--sr-accent-tint); filter: brightness(.97); }
+.chip:disabled, .chip.is-disabled { color: var(--sr-disabled); border-color: var(--mantine-color-default-border); cursor: not-allowed; background: none; }
+
+/* SegmentedControl built from radio inputs (no JS needed):
+   <div class="seg" role="radiogroup"><label class="seg-i"><input type="radio" name="x" checked><span>1×</span></label>…</div> */
+.seg { display: inline-flex; padding: 2px; gap: 0; background: var(--sr-hover); border: 1px solid var(--mantine-color-default-border); border-radius: var(--mantine-radius-sm); }
+.seg-i { position: relative; display: block; }
+.seg-i input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+.seg-i span { display: flex; align-items: center; justify-content: center; height: 18px; padding: 0 8px; border-radius: var(--mantine-radius-xs); font-size: 12px; font-weight: 500; color: var(--mantine-color-dimmed); white-space: nowrap; }
+.seg-i:hover span, .seg-i.is-hover span { color: var(--mantine-color-text); }
+.seg-i input:checked + span { background: var(--mantine-color-body); color: var(--mantine-color-text); box-shadow: var(--mantine-shadow-xs); }
+.seg-i input:focus-visible + span, .seg-i.is-focus span { outline: 2px solid var(--sr-focus); outline-offset: 1px; }
+.seg-i input:disabled + span { color: var(--sr-disabled); cursor: not-allowed; }
+
+/* Badge. .badge = "default" variant; .badge-light + a .c-* family tints it; .badge-xs is the small one. */
+.badge {
+  display: inline-flex; align-items: center; gap: 3px; height: 18px; padding: 0 7px; border-radius: 999px;
+  border: 1px solid var(--mantine-color-default-border); font-size: 11px; font-weight: 600; line-height: 1; white-space: nowrap; flex: none;
+  color: var(--mantine-color-text); background: transparent;
+}
+.badge-xs { height: 16px; padding: 0 5px; }
+.badge-light { border-color: transparent; background: var(--c-bg, var(--fam-gray-bg)); color: var(--c-fg, var(--fam-gray-fg)); }
+.badge .ic { width: 11px; height: 11px; }
+.dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: none; }
+
+/* Kbd */
+.kbd {
+  display: inline-block; padding: 0 5px; min-width: 18px; text-align: center; border-radius: var(--mantine-radius-xs);
+  border: 1px solid var(--mantine-color-default-border); border-bottom-width: 2px; background: var(--sr-hover);
+  font: 600 11px/16px var(--mantine-font-family-monospace); color: var(--mantine-color-text);
+}
+
+/* Alert (light): put a .c-yellow / .c-violet / .c-gray / .c-red family on it. */
+.alert {
+  display: flex; gap: 8px; align-items: flex-start; padding: 8px 10px; border-radius: var(--mantine-radius-sm);
+  background: var(--c-bg, var(--fam-gray-bg)); color: var(--mantine-color-text);
+  border: 1px solid color-mix(in srgb, var(--c-ink, var(--fam-gray-ink)) 45%, transparent);
+}
+.alert-title { font-weight: 600; font-size: 13px; line-height: 16px; }
+.alert-body { font-size: 12px; line-height: 16px; }
+
+/* Paper / Card, Divider, Progress, Skeleton, Loader */
+.card { background: var(--mantine-color-body); border: 1px solid var(--mantine-color-default-border); border-radius: var(--mantine-radius-md); padding: 16px; }
+.card-shadow { box-shadow: var(--mantine-shadow-md); }
+.hr { height: 1px; background: var(--sr-divider); border: 0; margin: 4px 0; }
+.progress { height: 6px; border-radius: 3px; background: var(--sr-pressed); overflow: hidden; }
+.progress > i { display: block; height: 100%; width: var(--v, 40%); background: var(--sr-primary-filled); border-radius: 3px; }
+.progress-striped > i { background: repeating-linear-gradient(45deg, var(--sr-primary-filled) 0 8px, color-mix(in srgb, var(--sr-primary-filled) 70%, var(--mantine-color-body)) 8px 16px); background-size: 22.6px 22.6px; animation: stripes 1s linear infinite; }
+.skeleton { display: block; height: 12px; border-radius: 3px; background: var(--sr-pressed); }
+.loader { width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--sr-accent-text); border-right-color: transparent; animation: spin .8s linear infinite; display: inline-block; }
+@keyframes stripes { to { background-position: 22.6px 0; } }
+@keyframes spin { to { rotate: 360deg; } }
+@media (prefers-reduced-motion: reduce) { .progress-striped > i, .loader { animation: none; } }
+
+/* Toast (Mantine notification) and modal pieces. Position them with a page style. */
+.toast { display: flex; align-items: center; gap: 10px; padding: 8px 12px; min-width: 260px; background: var(--mantine-color-body); border: 1px solid var(--mantine-color-default-border); border-radius: var(--mantine-radius-md); box-shadow: var(--mantine-shadow-md); font-size: 13px; }
+.scrim { position: absolute; inset: 0; background: var(--sr-scrim); }
+.modal { background: var(--mantine-color-body); border-radius: var(--mantine-radius-md); box-shadow: var(--mantine-shadow-md); }
+.modal-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; font-size: 15px; font-weight: 600; }
+
+/* ───────────────────────── 4. Tooltip and pop-ups ───────────────────────── */
+
+/* CSS tooltip: add data-tip="text". Optional data-tip-pos="bottom|bottom-end|bottom-start|top-end".
+   \A in the text is not needed: write real newlines in the attribute for multi-line tips. */
+[data-tip] { position: relative; }
+[data-tip]::after, [data-tip]::before { visibility: hidden; opacity: 0; pointer-events: none; position: absolute; z-index: 200; }
+[data-tip]::after {
+  content: attr(data-tip); left: 50%; bottom: calc(100% + 7px); translate: -50% 0; width: max-content; max-width: var(--tip-w, 280px);
+  padding: 4px 8px; border-radius: var(--mantine-radius-sm); background: var(--sr-tip-bg); color: var(--sr-tip-fg);
+  font: 400 12px/16px var(--mantine-font-family); white-space: pre-line; text-align: left; font-weight: 400;
+}
+[data-tip]::before { content: ""; left: 50%; bottom: calc(100% + 3px); width: 8px; height: 8px; translate: -50% 0; rotate: 45deg; background: var(--sr-tip-bg); }
+[data-tip-pos^="bottom"]::after { bottom: auto; top: calc(100% + 7px); }
+[data-tip-pos^="bottom"]::before { bottom: auto; top: calc(100% + 3px); }
+[data-tip-pos$="-end"]::after { left: auto; right: 0; translate: none; }
+[data-tip-pos$="-start"]::after { left: 0; translate: none; }
+[data-tip]:hover::after, [data-tip]:hover::before, [data-tip]:focus-visible::after, [data-tip]:focus-visible::before { animation: tip-in .12s .4s both; }
+@keyframes tip-in { from { opacity: 0; visibility: hidden; } to { opacity: 1; visibility: visible; } }
+/* A tooltip frozen open (for a mock that shows the hover state). */
+.tip-float { padding: 4px 8px; border-radius: var(--mantine-radius-sm); background: var(--sr-tip-bg); color: var(--sr-tip-fg); font: 400 12px/16px var(--mantine-font-family); white-space: nowrap; }
+
+/* Menu / Popover. <span class="pop-wrap"><button data-pop-toggle>…</button><div class="pop" hidden>…</div></span>
+   mock.js toggles `hidden`, closes on outside click and Esc. Modifiers: .pop-r (align right), .pop-up (opens above). */
+.pop-wrap { position: relative; display: inline-flex; }
+.pop {
+  position: absolute; z-index: 150; top: calc(100% + 4px); left: 0; min-width: 200px; padding: 4px;
+  background: var(--mantine-color-body); border: 1px solid var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-md); box-shadow: var(--mantine-shadow-md); font-size: 12px; text-align: left;
+}
+.pop-r { left: auto; right: 0; }
+.pop-up { top: auto; bottom: calc(100% + 4px); }
+.pop-wide { padding: 12px; }
+.menu-item { display: flex; align-items: center; gap: 8px; width: 100%; height: 26px; padding: 0 8px; border-radius: var(--mantine-radius-sm); font-size: 12px; white-space: nowrap; color: var(--mantine-color-text); }
+.menu-item:hover, .menu-item.is-hover { background: var(--sr-hover); }
+.menu-item[aria-disabled="true"] { color: var(--mantine-color-dimmed); cursor: default; }
+.menu-item[aria-disabled="true"]:hover { background: none; }
+.menu-item .menu-check { width: 14px; height: 14px; flex: none; visibility: hidden; }
+.menu-item[aria-checked="true"] .menu-check { visibility: visible; }
+.menu-item .menu-end { margin-left: auto; color: var(--mantine-color-dimmed); display: inline-flex; align-items: center; gap: 4px; }
+.menu-note { display: block; padding: 4px 8px; font-size: 11px; line-height: 14px; color: var(--mantine-color-dimmed); }
+.menu-label { display: block; padding: 4px 8px 2px; font-size: 11px; font-weight: 600; color: var(--mantine-color-dimmed); }
+
+/* ───────────────────────── 5. App shell ───────────────────────── */
+
+.app { display: flex; flex-direction: column; height: 100vh; min-height: 640px; }
+.hdr { flex: none; height: 40px; display: flex; align-items: center; gap: 12px; padding: 0 12px; background: var(--mantine-color-body); border-bottom: 1px solid var(--sr-divider); }
+.brand { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--mantine-color-text); }
+.brand:hover { text-decoration: none; }
+.mark { width: 18px; height: 18px; color: var(--sr-accent-text); fill: currentColor; }
+.nav { display: flex; align-items: center; gap: 4px; margin-left: 4px; }
+.nav-link { position: relative; display: inline-flex; align-items: center; height: 24px; padding: 0 8px; border-radius: var(--mantine-radius-sm); font-size: 12px; font-weight: 500; color: var(--mantine-color-dimmed); }
+.nav-link:hover { background: var(--sr-hover); text-decoration: none; }
+.nav-link[aria-current="page"] { color: var(--mantine-color-text); }
+.nav-link[aria-current="page"]::after { content: ""; position: absolute; left: 8px; right: 8px; bottom: -8px; height: 2px; background: var(--sr-accent-text); }
+.hdr-right { margin-left: auto; display: flex; align-items: center; gap: 4px; }
+
+.sbar { flex: none; height: 28px; display: flex; align-items: center; gap: 16px; padding: 0 12px; background: var(--sr-chrome); border-bottom: 1px solid var(--sr-divider); font-size: 12px; }
+.sbar-main { flex: 1; min-width: 0; display: flex; white-space: pre; } /* first span truncates; the zone tooltip must not be clipped */
+.sbar-main b { font-weight: 600; }
+.sbar-notes { flex: none; display: flex; align-items: center; gap: 12px; }
+.note { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; white-space: nowrap; }
+.note .ic { width: 14px; height: 14px; }
+.note-ok .ic { color: var(--sr-success-icon); }
+.note-bad { color: var(--sr-danger-text); }
+
+/* ───────────────────────── 6. Flexlayout chrome ─────────────────────────
+   Static stand-ins for flexlayout-react 0.11 markup. The real build sets the --flexlayout-* variables
+   from the same tokens (spec §4). Structure:
+   .fl > .fl-border + .fl-border-panel + .fl-main > (.fl-col > .fl-tabset | .fl-splitter)* */
+
+.fl { flex: 1; min-height: 0; display: flex; position: relative; background: var(--sr-ground); }
+.fl-main { flex: 1; min-width: 0; display: flex; position: relative; }
+.fl-col { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+/* Flexlayout weights: style="--wt:64" on a .fl-col or .fl-tabset sets its share. */
+.fl-col, .fl-tabset { flex: var(--wt, 1) 1 0; }
+.fl-splitter { flex: none; background: var(--sr-ground); position: relative; }
+.fl-splitter.v { width: 4px; cursor: col-resize; }
+.fl-splitter.h { height: 4px; cursor: row-resize; }
+.fl-splitter:hover, .fl-splitter.is-hover { background: var(--sr-control-border); }
+.fl-splitter.is-drag { background: var(--sr-accent-text); }
+
+/* Border strip (collapsed drawer rail, 28 px) and the open drawer. */
+.fl-border { flex: none; width: 28px; display: flex; flex-direction: column; align-items: stretch; background: var(--sr-chrome); border-right: 1px solid var(--sr-divider); }
+.fl-border-tab { position: relative; padding: 10px 0; display: flex; justify-content: center; color: var(--mantine-color-dimmed); font-size: 12px; font-weight: 500; cursor: pointer; }
+.fl-border-tab:hover, .fl-border-tab.is-hover { background: var(--sr-hover); color: var(--mantine-color-text); }
+.fl-vtext { writing-mode: vertical-rl; rotate: 180deg; white-space: nowrap; }
+.fl-border-tab[aria-selected="true"] { color: var(--mantine-color-text); }
+.fl-border-tab[aria-selected="true"]::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--sr-accent-text); }
+.fl-border-panel { flex: none; width: 320px; display: flex; flex-direction: column; background: var(--mantine-color-body); border-right: 1px solid var(--sr-divider); min-height: 0; }
+
+/* Tabset: strip + body. .is-active = the tabset that last had focus. */
+.fl-tabset { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--mantine-color-body); position: relative; }
+.fl-tabset.is-maximized { position: absolute; inset: 0; z-index: 40; }
+.fl-strip { flex: none; height: 28px; display: flex; align-items: stretch; background: var(--sr-chrome); border-bottom: 1px solid var(--sr-divider); }
+.fl-tabs { flex: 1; min-width: 0; display: flex; overflow: hidden; }
+.fl-tab {
+  position: relative; display: inline-flex; align-items: center; gap: 6px; padding: 0 6px 0 10px; margin-bottom: -1px; flex: none;
+  font-size: 12px; font-weight: 500; color: var(--mantine-color-dimmed); background: transparent; cursor: pointer; white-space: nowrap;
+}
+.fl-tab.no-close { padding-right: 10px; }
+.fl-tab:hover, .fl-tab.is-hover { color: var(--mantine-color-text); background: var(--sr-hover); }
+.fl-tab[aria-selected="true"] { color: var(--mantine-color-text); background: var(--mantine-color-body); box-shadow: inset 0 2px 0 var(--sr-control-border); }
+.fl-tabset.is-active .fl-tab[aria-selected="true"] { box-shadow: inset 0 2px 0 var(--sr-accent-text); }
+.fl-x { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: var(--mantine-radius-xs); color: var(--mantine-color-dimmed); opacity: 0; }
+.fl-x .ic { width: 12px; height: 12px; }
+.fl-tab:hover .fl-x, .fl-tab[aria-selected="true"] .fl-x, .fl-tab:focus-within .fl-x, .fl-tab.is-hover .fl-x, .fl-x.is-shown { opacity: 1; }
+.fl-x:hover { background: var(--sr-pressed); color: var(--mantine-color-text); }
+.fl-tab .badge { margin-left: -2px; }
+.fl-tab-ic { width: 14px; height: 14px; color: var(--sr-accent-text); }
+.fl-toolbar { flex: none; display: flex; align-items: center; gap: 2px; padding: 0 4px; }
+.fl-tb { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: var(--mantine-radius-sm); color: var(--mantine-color-dimmed); }
+.fl-tb:hover, .fl-tb.is-hover { background: var(--sr-hover); color: var(--mantine-color-text); }
+.fl-tb .ic { width: 14px; height: 14px; }
+.fl-tb .ic-min { display: none; }
+.is-maximized .fl-tb .ic-min { display: inline-block; color: var(--sr-accent-text); }
+.is-maximized .fl-tb .ic-max { display: none; }
+.fl-body { flex: 1; min-height: 0; position: relative; overflow: hidden; }
+.fl-panel { position: absolute; inset: 0; display: flex; flex-direction: column; min-height: 0; background: var(--mantine-color-body); }
+.fl-drag { border: 2px solid var(--sr-accent-text); background: var(--sr-accent-tint); opacity: .85; }
+
+/* ───────────────────────── 7. Panel parts ───────────────────────── */
+
+.pn-tools { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; padding: 6px 8px; background: var(--sr-chrome); border-bottom: 1px solid var(--sr-divider); }
+.pn-tools .field { flex: 1; min-width: 120px; }
+.pn-note { flex: none; display: flex; align-items: flex-start; gap: 6px; padding: 4px 8px; font-size: 11px; line-height: 14px; color: var(--mantine-color-dimmed); border-bottom: 1px solid var(--sr-divider); }
+.pn-note .ic { width: 12px; height: 12px; margin-top: 1px; }
+.pn-note.c-yellow { background: var(--sr-warning-tint); color: var(--mantine-color-text); }
+.pn-note.c-gray { background: var(--sr-hover); }
+.pn-scroll { flex: 1; min-height: 0; overflow: auto; position: relative; }
+.pn-foot { flex: none; display: flex; align-items: flex-start; gap: 6px; padding: 5px 8px; font-size: 11px; line-height: 14px; color: var(--mantine-color-dimmed); border-top: 1px solid var(--sr-divider); background: var(--sr-chrome); }
+.pn-foot .ic { width: 12px; height: 12px; margin-top: 1px; }
+.pn-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; padding: 24px; text-align: center; color: var(--mantine-color-dimmed); font-size: 12px; }
+.pn-empty b { color: var(--mantine-color-text); font-size: 13px; font-weight: 600; }
+.follow-fab { position: absolute; right: 12px; bottom: 10px; box-shadow: var(--mantine-shadow-md); }
+.sec { padding: 8px 12px 10px; border-bottom: 1px solid var(--sr-divider); }
+.sec-h { margin: 0 0 6px; font-size: 11px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; color: var(--mantine-color-dimmed); }
+.kv { display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: 3px 8px; font-size: 12px; line-height: 16px; margin: 0; }
+.kv dt { color: var(--mantine-color-dimmed); } .kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+
+/* ───────────────────────── 8. Lists, trees, tables ───────────────────────── */
+
+/* Actions rows (22 px): time · play-head gutter · kind · name + summary · ×count */
+.act { display: grid; grid-template-columns: 58px 10px 72px minmax(0, 1fr) auto; align-items: center; gap: 0 4px; height: 24px; padding: 0 8px; font-size: 12px; cursor: default; }
+.act:hover { background: var(--sr-hover); }
+.act.is-current { background: var(--sr-accent-tint); }
+.act-time { color: var(--mantine-color-dimmed); }
+.act-cur { display: flex; color: var(--sr-accent-text); }
+.act-kind { display: flex; align-items: center; gap: 4px; color: var(--mantine-color-dimmed); }
+.act-kind .ic { width: 14px; height: 14px; }
+.act-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.act-text b { font-weight: 500; }
+.act-text span { color: var(--mantine-color-dimmed); }
+.act.is-danger .act-text, .act.is-danger .act-text span, .act.is-danger .act-kind, .act.is-danger .act-time { color: var(--sr-danger-text); }
+.act.is-danger:hover { background: var(--sr-danger-tint); }
+
+/* Console rows (<details> so the stack expands without JS) */
+.con { border-bottom: 1px solid var(--sr-divider); }
+.con > summary, .con-row { display: grid; grid-template-columns: 58px 16px minmax(0, 1fr) auto 14px; align-items: center; gap: 0 6px; min-height: 24px; padding: 0 8px; font-size: 12px; list-style: none; cursor: pointer; }
+.con > summary::-webkit-details-marker { display: none; }
+.con > summary:hover { background: var(--sr-hover); }
+.con .con-msg { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mantine-font-family-monospace); font-size: 12px; }
+.con[open] .con-msg { white-space: normal; overflow: visible; padding: 3px 0; }
+.con .con-chev { width: 12px; height: 12px; color: var(--mantine-color-dimmed); transition: rotate .1s; }
+.con[open] .con-chev { rotate: 90deg; }
+.con-lvl-error { color: var(--sr-danger-text); }
+.con-lvl-warn > summary > .ic:nth-child(2) { color: var(--sr-warning-icon); }
+.con-stack { margin: 0; padding: 4px 8px 8px 80px; font-size: 11px; line-height: 15px; color: var(--mantine-color-dimmed); background: var(--sr-chrome); white-space: pre; overflow: auto; }
+
+/* Tables (Network, Info, Hotspots) */
+.tbl { width: 100%; border-collapse: collapse; font-size: 12px; }
+.tbl th { position: sticky; top: 0; z-index: 1; height: 24px; padding: 0 8px; text-align: left; font-weight: 600; font-size: 11px; color: var(--mantine-color-dimmed); background: var(--sr-chrome); border-bottom: 1px solid var(--sr-divider); white-space: nowrap; }
+.tbl td { height: 24px; padding: 0 8px; border-bottom: 1px solid var(--sr-divider); white-space: nowrap; }
+.tbl tbody tr:hover { background: var(--sr-hover); }
+.tbl .r { text-align: right; }
+.tbl .url { max-width: 0; width: 100%; overflow: hidden; text-overflow: ellipsis; font-family: var(--mantine-font-family-monospace); }
+.tbl tr.is-danger td { color: var(--sr-danger-text); }
+
+/* State JSON tree. <details class="jt" open><summary class="jt-row">…</summary><div class="jt-kids">…</div></details> */
+.jt, .jt-row { font-family: var(--mantine-font-family-monospace); font-size: 12px; }
+.jt-row { display: flex; align-items: center; gap: 6px; height: 24px; padding: 0 8px; list-style: none; cursor: pointer; white-space: nowrap; }
+.jt-row::-webkit-details-marker { display: none; }
+.jt-row:hover { background: var(--sr-hover); }
+.jt-chev { width: 12px; height: 12px; flex: none; color: var(--mantine-color-dimmed); transition: rotate .1s; }
+.jt[open] > .jt-row .jt-chev { rotate: 90deg; }
+.jt-pad { width: 12px; flex: none; }
+.jt-kids { padding-left: 14px; }
+.jt-key { color: var(--mantine-color-text); }
+.jt-meta { margin-left: auto; color: var(--mantine-color-dimmed); font-size: 11px; }
+.jt-str { color: var(--sr-success-text); } .jt-num { color: var(--sr-json-num); } .jt-bool { color: var(--sr-json-bool); }
+.jt-null { color: var(--mantine-color-dimmed); font-style: italic; }
+.jt-chg { color: var(--sr-accent-text); font-weight: 700; }
+.jt-chip { font-family: var(--mantine-font-family); }
+
+/* Diff rows */
+.df { display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 0 8px; align-items: baseline; padding: 3px 8px; font-family: var(--mantine-font-family-monospace); font-size: 12px; line-height: 16px; border-bottom: 1px solid var(--sr-divider); }
+.df-add .df-sign { color: var(--sr-success-text); } .df-del .df-sign { color: var(--sr-danger-text); }
+.df-chg { background: var(--sr-warning-tint); }
+.df-sign { font-weight: 700; text-align: center; }
+.df-path { font-weight: 600; }
+.df-val { color: var(--mantine-color-text); overflow-wrap: anywhere; }
+.df-arrow { color: var(--mantine-color-dimmed); }
+
+/* ───────────────────────── 9. Player ───────────────────────── */
+
+.player { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.stage { position: relative; flex: 1; min-height: 120px; display: flex; align-items: center; justify-content: center; overflow: hidden; background: var(--sr-stage); }
+/* Banner overlay: sits on the top of the stage and does not push the layout. */
+.banner { position: absolute; z-index: 5; top: 8px; left: 8px; right: 8px; max-width: 620px; box-shadow: var(--mantine-shadow-xs); background-clip: padding-box; }
+.stage-pill { position: absolute; z-index: 5; top: 8px; right: 8px; }
+.stage-overlay { position: absolute; inset: 0; z-index: 4; display: flex; align-items: center; justify-content: center; }
+
+/* Recorded-screen stand-in (.rs). Always drawn in its OWN light colours: the replay is never recoloured.
+   mock.js sets --fit on .stage so .rs-fit wraps the 2560x1400 frame at the right size. */
+.rs-fit { position: relative; flex: none; width: calc(2560px * var(--fit, .41)); height: calc(1400px * var(--fit, .41)); box-shadow: 0 0 0 1px rgba(0, 0, 0, .25); }
+.rs { position: absolute; left: 0; top: 0; width: 2560px; height: 1400px; transform: scale(var(--fit, .41)); transform-origin: 0 0; overflow: hidden;
+  background: #f4f6f9; color: #1c2430; font: 400 22px/1.3 system-ui, "Segoe UI", Arial, sans-serif; }
+.rs-top { height: 76px; display: flex; align-items: center; gap: 44px; padding: 0 40px; background: #0d3b66; color: #fff; font-size: 26px; }
+.rs-top b { font-size: 30px; margin-right: 24px; }
+.rs-top .on { box-shadow: inset 0 -5px 0 #f4b942; padding: 24px 0 19px; }
+.rs-top .who { margin-left: auto; font-size: 22px; opacity: .85; }
+.rs-body { display: flex; gap: 28px; padding: 28px 40px; height: calc(100% - 76px); }
+.rs-card { background: #fff; border: 2px solid #d5dbe3; border-radius: 6px; }
+.rs-card h4 { margin: 0; padding: 16px 24px; font-size: 28px; border-bottom: 2px solid #e4e8ee; display: flex; justify-content: space-between; }
+.rs-card h4 span { font-size: 22px; font-weight: 400; color: #5b6676; }
+.rs-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 28px; }
+.rs-side { width: 640px; flex: none; display: flex; flex-direction: column; gap: 28px; }
+.rs-grid { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.rs-gr { display: grid; grid-template-columns: 1.1fr .8fr .9fr .8fr .8fr .8fr 1fr .7fr; align-items: center; height: 54px; padding: 0 24px; border-bottom: 2px solid #eef1f5; }
+.rs-gr.h { height: 56px; background: #eaeef4; font-weight: 700; color: #3a4658; }
+.rs-gr i { font-style: normal; } .rs-gr i + i { text-align: right; }
+.rs-gr.z { background: #f8fafc; }
+.rs-up { color: #1b8a3a; } .rs-dn { color: #c0392b; }
+.rs-form { padding: 20px 24px; display: grid; gap: 16px; }
+.rs-form div { display: flex; justify-content: space-between; align-items: center; }
+.rs-form i { font-style: normal; border: 2px solid #b9c2cf; border-radius: 4px; padding: 6px 14px; min-width: 240px; text-align: right; background: #fff; }
+.rs-btn { display: inline-block; padding: 10px 28px; border-radius: 5px; background: #0d6efd; color: #fff; font-weight: 700; text-align: center; }
+
+/* Scrubber: 3 lanes (Events 12 · Screen 18 · State 6) + loaded strip 2 + axis 14 = 60 px with padding. */
+.scrub { flex: none; position: relative; height: 62px; display: flex; padding: 4px 14px 0 0; background: var(--mantine-color-body); border-top: 1px solid var(--sr-divider); forced-color-adjust: none; cursor: pointer; }
+.scrub-gut { flex: none; width: 52px; position: relative; font-size: 11px; line-height: 12px; color: var(--mantine-color-dimmed); }
+.scrub-gut span { position: absolute; right: 8px; white-space: nowrap; }
+.scrub-gut .g-ev { top: 0; } .scrub-gut .g-sc { top: 17px; } .scrub-gut .g-st { top: 33px; }
+.scrub-plot { position: relative; flex: 1; min-width: 0; height: 56px; }
+.lane { position: absolute; left: 0; right: 0; }
+.lane-ev { top: 0; height: 12px; }
+.lane-sc { top: 14px; height: 18px; background: var(--sr-track); }
+.lane-sc .played { position: absolute; left: 0; top: 0; bottom: 0; width: var(--w); background: var(--sr-track-played); }
+.lane-ld { top: 32px; height: 2px; }
+.lane-ld i { position: absolute; top: 0; bottom: 0; left: var(--l, 0); width: var(--w); background: var(--sr-loaded); }
+.lane-st { top: 36px; height: 6px; background: color-mix(in srgb, var(--sr-track) 50%, transparent); }
+.axis { position: absolute; left: 0; right: 0; top: 43px; height: 13px; font-size: 11px; line-height: 13px; color: var(--mantine-color-dimmed); }
+.axis span { position: absolute; left: var(--l); translate: -50% 0; white-space: nowrap; }
+.axis span::before { content: ""; position: absolute; left: 50%; top: -3px; width: 1px; height: 2px; background: var(--sr-control-border); }
+/* Play head: 2 px line from Events to State, 12 px thumb on the Screen lane with a body-coloured ring. */
+.head { position: absolute; left: var(--l); top: 0; height: 42px; width: 2px; translate: -1px 0; background: var(--sr-accent-text); pointer-events: none; z-index: 6; }
+.head::after { content: ""; position: absolute; left: 50%; top: 23px; width: 12px; height: 12px; translate: -50% 0; border-radius: 50%; background: var(--sr-accent-text); box-shadow: 0 0 0 2px var(--mantine-color-body); }
+.scrub:focus-visible { outline-offset: -2px; }
+.scrub-hover { position: absolute; left: var(--l); top: 0; height: 42px; width: 1px; background: var(--mantine-color-dimmed); z-index: 5; pointer-events: none; }
+.scrub-hover .tip-float { position: absolute; bottom: calc(100% + 4px); left: 8px; white-space: pre; box-shadow: var(--mantine-shadow-md); z-index: 30; }
+
+/* Markers on the Events lane: 8 px glyph in a 16 px hit target. Put the lane position in --l. */
+.mk { position: absolute; left: var(--l); top: 0; translate: -8px 0; min-width: 16px; height: 12px; padding: 0 2px; display: flex; align-items: center; justify-content: center; gap: 1px; }
+.mk .ic { width: 8px; height: 8px; }
+.mk-error, .mk-fail { color: var(--sr-danger); }
+.mk-report { color: var(--sr-accent-text); }
+.mk-note { color: var(--sr-warning-icon); }
+.mk-note::after { content: ""; position: absolute; left: 50%; top: 12px; width: 1px; height: 2px; background: var(--sr-warning-icon); }
+
+/* Transport (one 32 px row, wraps on narrow stages) and the rate-cap line. */
+.transport { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; min-height: 32px; padding: 4px 10px; background: var(--mantine-color-body); border-top: 1px solid var(--sr-divider); }
+.tp-group { display: flex; align-items: center; gap: 2px; }
+.tp-clock { font-size: 13px; font-weight: 600; white-space: nowrap; }
+.tp-elapsed { font-size: 12px; color: var(--mantine-color-dimmed); white-space: nowrap; }
+.tp-right { margin-left: auto; display: flex; align-items: center; gap: 4px; }
+.ratecap { flex: none; height: 18px; padding: 0 12px; font-size: 11px; line-height: 18px; color: var(--mantine-color-dimmed); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; background: var(--mantine-color-body); }
+
+/* ───────────────────────── 10. Band patterns (spec §4) ─────────────────────────
+   A band sets --fill and --ink, then draws its pattern. Same classes on scrubber bands (.band),
+   legend swatches and banner icons (.sw). Size and position come from the element. */
+
+.band { position: absolute; top: 0; bottom: 0; left: var(--l); width: var(--w); min-width: 3px; background-color: var(--fill); border-inline: 1px solid var(--ink); }
+.sw { display: inline-block; width: 16px; height: 16px; flex: none; border-radius: 2px; background-color: var(--fill, transparent); border: 1px solid var(--ink, var(--sr-control-border)); vertical-align: middle; }
+.sw-wide { width: 28px; height: 14px; }
+.b-pause, .b-quota, .b-overflow { --fill: var(--band-amber-fill); --ink: var(--band-amber-ink); }
+.b-popout { --fill: var(--band-violet-fill); --ink: var(--band-violet-ink); }
+.b-hidden { --fill: var(--band-gray-fill); --ink: var(--band-gray-ink); }
+.b-missing, .b-unreadable { --fill: var(--band-red-fill); --ink: var(--band-red-ink); }
+.b-pause { background-image: repeating-linear-gradient(45deg, var(--ink) 0 2px, transparent 2px 6px); }
+.b-quota { background-image: repeating-linear-gradient(0deg, var(--ink) 0 1.5px, transparent 1.5px 4px); }
+.b-overflow { background-image: radial-gradient(circle, var(--ink) 0 .75px, transparent 1px); background-size: 5px 5px; }
+.b-popout { background-image: repeating-linear-gradient(135deg, var(--ink) 0 2px, transparent 2px 6px); }
+.b-hidden { background-image: repeating-linear-gradient(90deg, var(--ink) 0 1.5px, transparent 1.5px 5px); }
+.b-missing { background-image: repeating-linear-gradient(45deg, var(--ink) 0 1.5px, transparent 1.5px 6px), repeating-linear-gradient(135deg, var(--ink) 0 1.5px, transparent 1.5px 6px); }
+.b-unreadable { background-image: conic-gradient(var(--ink) 25%, transparent 0 50%, var(--ink) 0 75%, transparent 0); background-size: 6px 6px; }
+.b-missing.band, .b-unreadable.band { border-inline: 0; border-block: 2px solid var(--ink); }
+/* Thin strips: snapshot-slow (Screen lane bottom, 4 px dashes) and no-state (State lane, dashes). */
+.thin { position: absolute; left: var(--l, 0); width: var(--w, 100%); }
+.b-slow { bottom: 0; height: 4px; background-image: repeating-linear-gradient(90deg, var(--band-slow-ink) 0 6px, transparent 6px 9px); }
+.b-nostate { top: 2px; height: 2px; background-image: repeating-linear-gradient(90deg, var(--band-nostate-ink) 0 4px, transparent 4px 7px); }
+.sw.b-slow, .sw.b-nostate { position: static; height: 16px; width: 16px; --fill: transparent; --ink: var(--band-slow-ink); background-color: transparent; border-color: var(--sr-divider); }
+.sw.b-slow { background-image: repeating-linear-gradient(90deg, var(--band-slow-ink) 0 6px, transparent 6px 9px); background-size: 100% 4px; background-repeat: repeat-x; background-position: 0 100%; }
+.sw.b-nostate { background-image: repeating-linear-gradient(90deg, var(--band-nostate-ink) 0 4px, transparent 4px 7px); background-size: 100% 2px; background-repeat: repeat-x; background-position: 0 50%; }
+/* The time between recordings: drawn to scale, ground fill + dashed outline. */
+.nopage { position: absolute; top: 0; bottom: 0; left: var(--l); width: var(--w); background: var(--sr-ground); outline: 1px dashed var(--sr-control-border); outline-offset: -1px; display: flex; align-items: center; justify-content: center; font-size: 11px; color: var(--mantine-color-dimmed); white-space: nowrap; overflow: hidden; }
+.rec-bound { position: absolute; top: 0; bottom: 0; left: var(--l); width: 1px; background: var(--sr-control-border); }
+/* Short label chip inside a band at least 72 px wide. */
+.band-label { position: absolute; left: 50%; top: 50%; translate: -50% -50%; padding: 0 4px; border-radius: var(--mantine-radius-xs); background: var(--fill); color: var(--mantine-color-text); font-size: 11px; font-weight: 500; line-height: 14px; white-space: nowrap; }
+/* Banner/legend icon: the band's own pattern in a 16 px swatch. */
+
+/* ───────────────────────── 11. Mock-only pieces ─────────────────────────
+   The MOCK pill must look clearly unlike the product UI: dashed, monospace, magenta. */
+
+.mock-pill { position: fixed; left: 12px; bottom: 12px; z-index: 1000; font: 600 11px/1 ui-monospace, "Cascadia Mono", Consolas, monospace; }
+.mock-pill > button { display: flex; align-items: center; gap: 6px; padding: 6px 9px; border: 2px dashed #c2255c; border-radius: 0; background: #fff0f6; color: #a61e4d; text-transform: uppercase; letter-spacing: .04em; cursor: pointer; }
+.mock-pill-list { position: absolute; left: 0; bottom: calc(100% + 6px); min-width: 240px; padding: 6px; background: #fff0f6; border: 2px dashed #c2255c; display: flex; flex-direction: column; gap: 2px; }
+.mock-pill-list button { padding: 5px 8px; text-align: left; color: #a61e4d; text-transform: none; letter-spacing: 0; border: 1px solid transparent; }
+.mock-pill-list button:hover { background: #ffdeeb; }
+.mock-pill-list button[aria-current="true"] { border-color: #c2255c; background: #ffdeeb; }
+.mock-pill-list button::before { content: "○ "; }
+.mock-pill-list button[aria-current="true"]::before { content: "● "; }
+.mock-pill:focus-within > button, .mock-pill button:focus-visible { outline: 2px solid #a61e4d; outline-offset: 2px; }
+
+/* Windows high-contrast: keep the scrubber patterns and the tab selection visible. */
+@media (forced-colors: active) {
+  .fl-tab[aria-selected="true"] { outline: 2px solid Highlight; }
+}
+
+/* ───────────────────────── 12. Session rows, legend rows ───────────────────────── */
+
+/* Sessions list row (40 px, two lines). .is-open = the session on screen. */
+.ses { display: flex; flex-direction: column; justify-content: center; height: 40px; padding: 0 12px 0 10px; border-left: 2px solid transparent; cursor: pointer; font-size: 12px; }
+.ses:hover, .ses.is-hover { background: var(--sr-hover); }
+.ses.is-open { background: var(--sr-accent-tint); border-left-color: var(--sr-accent-text); }
+.ses-l1, .ses-l2 { display: flex; align-items: center; justify-content: space-between; gap: 8px; line-height: 16px; }
+.ses-l1 { font-weight: 500; } .ses-l2 { color: var(--mantine-color-dimmed); }
+.ses-badges { display: flex; align-items: center; gap: 6px; }
+.cnt { display: inline-flex; align-items: center; gap: 2px; font-size: 11px; font-weight: 600; color: var(--mantine-color-text); }
+.cnt .ic { width: 12px; height: 12px; }
+.cnt-warn .ic { color: var(--sr-warning-icon); } .cnt-fail .ic { color: var(--sr-danger); } .cnt-report .ic { color: var(--sr-accent-text); } .cnt-gap .ic { color: var(--mantine-color-dimmed); }
+
+/* Legend row: swatch · name · what it means. Used in the Legend popover and in Info. */
+.lg-row { display: flex; align-items: center; gap: 8px; min-height: 22px; font-size: 12px; line-height: 16px; }
+.lg-row b { font-weight: 500; white-space: nowrap; }
+.lg-row span.dim { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lg-mk { width: 16px; display: inline-flex; justify-content: center; flex: none; }
+.lg-mk .ic { width: 10px; height: 10px; }

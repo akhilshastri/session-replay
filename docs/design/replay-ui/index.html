@@ -1,0 +1,77 @@
+<!doctype html>
+<!--
+  Index of the Session Replay UI design mocks (plan 06, task U0). Links every mock in spec §5
+  and carries the theme menu. Open this file straight from disk; nothing loads
+  from the network. Shared files: mock.css (tokens, controls, flexlayout chrome) and mock.js (theme, tabs,
+  pop-ups, MOCK variant pill, icon sprite).
+-->
+<html lang="en" data-mantine-color-scheme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Session Replay UI mocks</title>
+<script src="mock.js"></script>
+<link rel="stylesheet" href="mock.css">
+<style>
+  /* Page-only styles: a plain document, not the app shell. */
+  .doc { max-width: 980px; margin: 0 auto; padding: 24px 24px 64px; }
+  .doc h1 { font-size: 18px; line-height: 24px; font-weight: 600; margin-bottom: 4px; }
+  .lead { color: var(--mantine-color-dimmed); margin-bottom: 16px; }
+  .list { background: var(--mantine-color-body); border: 1px solid var(--sr-divider); border-radius: var(--mantine-radius-md); overflow: hidden; }
+  .item { display: grid; grid-template-columns: 250px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--sr-divider); }
+  .item:last-child { border-bottom: 0; }
+  .item a { font-weight: 500; }
+  .howto { margin-top: 16px; padding: 12px; background: var(--mantine-color-body); border: 1px solid var(--sr-divider); border-radius: var(--mantine-radius-md); }
+  .howto ul { margin: 6px 0 0; padding-left: 18px; }
+</style>
+</head>
+<body>
+
+<header class="hdr">
+  <span class="brand">
+    <svg class="mark" viewBox="0 0 18 18" aria-hidden="true"><path d="M4 1.5l9 5-9 5z"/><rect x="1" y="14" width="4.6" height="2.5" rx="1"/><rect x="6.7" y="14" width="4.6" height="2.5" rx="1" opacity=".7"/><rect x="12.4" y="14" width="4.6" height="2.5" rx="1" opacity=".4"/></svg>
+    Session Replay
+  </span>
+  <span class="dim sm">Design mocks</span>
+  <div class="hdr-right">
+    <!-- Theme menu: System / Light / Dark. The choice is saved in localStorage['mantine-color-scheme-value'] and shared by every mock. -->
+    <span class="pop-wrap">
+      <button class="ai" type="button" data-pop-toggle aria-haspopup="menu" aria-label="Colour theme" data-tip="Colour theme" data-tip-pos="bottom-end"><svg class="ic"><use href="#i-sun-moon"/></svg></button>
+      <div class="pop pop-r" role="menu" hidden>
+        <button class="menu-item" type="button" role="menuitemradio" data-scheme="auto" aria-checked="false"><svg class="ic menu-check"><use href="#i-check"/></svg><span>System<span class="sys-now dim"></span></span></button>
+        <button class="menu-item" type="button" role="menuitemradio" data-scheme="light" aria-checked="false"><svg class="ic menu-check"><use href="#i-check"/></svg>Light</button>
+        <button class="menu-item" type="button" role="menuitemradio" data-scheme="dark" aria-checked="false"><svg class="ic menu-check"><use href="#i-check"/></svg>Dark</button>
+      </div>
+    </span>
+  </div>
+</header>
+
+<main class="doc">
+  <h1>Replay UI mocks</h1>
+  <p class="lead">Static pages for plan 06. They show the look and the states, not the real app. Scenario: user u123, blotter 4.2.1, Mon 10 Nov 2026.</p>
+
+  <div class="list">
+    <div class="item"><a href="00-tokens.html">00 · Tokens and states</a><span>Colour tokens with contrast ratios, type, spacing, every control state, the 14 reason patterns, flexlayout chrome, icons. Both themes side by side.</span><span class="badge badge-light c-blue">built</span></div>
+    <div class="item"><a href="01-replay-empty.html">01 · Replay, nothing open</a><span>The workspace at <span class="mono">/</span> with the Sessions drawer open and four sessions listed.</span><span class="badge badge-light c-blue">built</span></div>
+    <div class="item"><a href="02-access-prompt.html">02 · Access prompt</a><span>The reason dialog over 01. Variants: first open, deep link, validation errors, submitting, server error, expired.</span><span class="badge badge-light c-blue">built</span></div>
+    <div class="item"><a href="03-replay-playing.html">03 · Replay playing</a><span>Play head inside a paused band, banner, bands on the scrubber, Actions following, State tab. Diff, Info, Console and Network by tab click.</span><span class="badge badge-light c-blue">built</span></div>
+    <div class="item"><a href="04-replay-screen-unknown.html">04 · Screen unknown</a><span>Missing batches with the overlay and stale State; chunk unreadable with the red integrity note.</span><span class="badge badge-light c-blue">built</span></div>
+    <div class="item"><a href="05-replay-loading.html">05 · Loading and seeking</a><span>Download progress, building, buffering pill, "Skipped 11m" toast, live end with Load newer.</span><span class="badge badge-light c-blue">built</span></div>
+    <div class="item"><a href="06-panel-states.html">06 · Panel states</a><span>Gallery of labelled cards: every panel in its empty, loading and error states.</span><span class="badge badge-light c-blue">built</span></div>
+    <div class="item"><a href="07-hotspots.html">07 · Hotspots</a><span>Populated, partial day, empty, loading and error. No workspace and no session bar.</span><span class="badge badge-light c-blue">built</span></div>
+    <div class="item"><a href="08-shortcuts.html">08 · Keyboard shortcuts</a><span>The shortcuts sheet over 03.</span><span class="badge badge-light c-blue">built</span></div>
+    <div class="item"><a href="09-layout-and-menus.html">09 · Layout and menus</a><span>Layout menu, theme menu, Player maximised, a frozen drag with edge-dock hints, "Layout reset. Undo" toast.</span><span class="badge badge-light c-blue">built</span></div>
+  </div>
+
+  <div class="howto">
+    <b class="b6">How to use</b>
+    <ul>
+      <li>Open any page straight from disk. No server, no network.</li>
+      <li>Theme menu (top right): System follows your OS live. Light and Dark are saved and shared by all pages.</li>
+      <li>The dashed <b>MOCK</b> pill at the bottom left switches variants on pages that have them. A link such as <span class="mono">03-replay-playing.html#hover</span> opens one directly.</li>
+      <li>Tabs, the Layout and zoom menus, chips and the speed control work. The replay itself does not play.</li>
+    </ul>
+  </div>
+</main>
+</body>
+</html>

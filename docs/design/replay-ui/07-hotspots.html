@@ -1,0 +1,246 @@
+<!doctype html>
+<!--
+  07 — Hotspots (plan 06 spec §3e). Route /hotspots: no workspace, no session bar, no Layout button.
+  Screens where recording paused to keep the app fast; each row is a fix for the app team.
+  Scenario: NAM region, Mon 9 Nov 2026 (UTC day), four areas, 47m 47s paused in total.
+  Variants (MOCK pill, bottom left): Populated 2026-11-09 · Partial day 2026-11-10 · Empty · Loading · Error.
+  Header markup is copied from 03-replay-playing.html. Everything is static; mock.css + mock.js do the rest.
+-->
+<html lang="en" data-mantine-color-scheme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hotspots · Session Replay mock 07</title>
+<script src="mock.js"></script>
+<link rel="stylesheet" href="mock.css">
+<style>
+  /* Page-only styles: the Hotspots page body and the five variants. */
+  .hs-page { flex: 1; min-height: 0; overflow: auto; background: var(--mantine-color-body); }
+  .hs-in { max-width: 1480px; margin: 0 auto; padding: 16px 24px 48px; }
+  .hs-title { font-size: 18px; line-height: 24px; font-weight: 600; }
+  .hs-sub { margin-top: 2px; font-size: 12px; line-height: 16px; color: var(--mantine-color-dimmed); }
+  .hs-ctl { display: flex; align-items: center; gap: 12px; margin: 12px 0; }
+  .hs-ctl .lbl { font-size: 12px; font-weight: 600; }
+  .hs-day { display: flex; align-items: center; gap: 4px; }
+  .hs-day .input { width: 112px; display: flex; align-items: center; }
+  .hs-sum { margin-left: auto; font-size: 12px; color: var(--mantine-color-dimmed); display: flex; align-items: center; gap: 8px; }
+  .hs-sum b { color: var(--mantine-color-text); font-weight: 600; }
+
+  /* Variants: only the block that matches body[data-variant] shows. */
+  .hs { display: none; }
+  body[data-variant="populated"] .hs[data-v="populated"],
+  body[data-variant="partial"] .hs[data-v="partial"],
+  body[data-variant="empty"] .hs[data-v="empty"],
+  body[data-variant="loading"] .hs[data-v="loading"],
+  body[data-variant="error"] .hs[data-v="error"] { display: block; }
+
+  .hs-tbl { border: 1px solid var(--sr-divider); border-radius: var(--mantine-radius-sm); overflow: auto; max-height: calc(100vh - 230px); }
+  .hs-tbl .tbl td { height: 30px; }
+  .hs-tbl .tbl th { height: 28px; }
+  .th-btn { display: inline-flex; align-items: center; gap: 4px; font: inherit; font-weight: 600; color: inherit; height: 100%; }
+  .th-btn .ic { width: 12px; height: 12px; color: var(--mantine-color-dimmed); }
+  .th-btn.is-sorted { color: var(--mantine-color-text); }
+  .th-btn.is-sorted .ic { color: var(--sr-accent-text); }
+  .tbl th.r .th-btn { justify-content: flex-end; width: 100%; }
+  /* Area cell: monospace, truncated, with a copy icon on row hover. */
+  .hs-area { display: flex; align-items: center; gap: 4px; }
+  .hs-area .cp { opacity: 0; width: 20px; height: 20px; }
+  .hs-area .cp .ic { width: 13px; height: 13px; }
+  .tbl tbody tr:hover .cp, .hs-area .cp:focus-visible { opacity: 1; }
+  .hs-area .mid { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* Paused cell: number left of an in-cell bar (96 px max, 6 px tall, 3 px rounded data end). One series, so no legend. */
+  .hs-paused { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+  .hs-paused .n { min-width: 56px; text-align: right; font-weight: 600; }
+  .hs-bar { width: 96px; height: 6px; flex: none; }
+  .hs-bar i { display: block; height: 100%; width: var(--p); background: var(--sr-loaded); border-radius: 0 3px 3px 0; min-width: 2px; }
+  .hs-ex { min-width: 150px; }
+  .tbl td.pk { color: var(--mantine-color-text); }
+  .hs-skel td { height: 30px; }
+  .hs-state { margin-top: 12px; border: 1px solid var(--sr-divider); border-radius: var(--mantine-radius-sm); }
+  .hs-state .pn-empty { padding: 56px 24px; }
+  .hs-err { max-width: 560px; margin-top: 12px; }
+</style>
+</head>
+<body data-variants="populated:Populated · 2026-11-09;partial:Partial day · 2026-11-10;empty:Empty;loading:Loading;error:Error">
+<div class="app">
+
+  <!-- ═══ HEADER (40 px): same as 03, but no Layout menu on this route ═══ -->
+  <header class="hdr">
+    <a class="brand" href="index.html">
+      <svg class="mark" viewBox="0 0 18 18" aria-hidden="true"><path d="M4 1.5l9 5-9 5z"/><rect x="1" y="14" width="4.6" height="2.5" rx="1"/><rect x="6.7" y="14" width="4.6" height="2.5" rx="1" opacity=".7"/><rect x="12.4" y="14" width="4.6" height="2.5" rx="1" opacity=".4"/></svg>
+      Session Replay
+    </a>
+    <span class="badge" tabindex="0" data-tip="Region: North America. Recordings stay in their region." data-tip-pos="bottom">NAM</span>
+    <nav class="nav" aria-label="Main">
+      <a class="nav-link" href="03-replay-playing.html">Replay</a>
+      <a class="nav-link" href="07-hotspots.html" aria-current="page">Hotspots</a>
+    </nav>
+    <div class="hdr-right">
+      <span class="pop-wrap">
+        <button class="ai" type="button" data-pop-toggle aria-haspopup="menu" aria-label="Colour theme" data-tip="Colour theme" data-tip-pos="bottom"><svg class="ic"><use href="#i-sun-moon"/></svg></button>
+        <div class="pop pop-r" role="menu" hidden>
+          <button class="menu-item" type="button" role="menuitemradio" data-scheme="auto" aria-checked="false"><svg class="ic menu-check"><use href="#i-check"/></svg><span>System<span class="sys-now dim"></span></span></button>
+          <button class="menu-item" type="button" role="menuitemradio" data-scheme="light" aria-checked="false"><svg class="ic menu-check"><use href="#i-check"/></svg>Light</button>
+          <button class="menu-item" type="button" role="menuitemradio" data-scheme="dark" aria-checked="false"><svg class="ic menu-check"><use href="#i-check"/></svg>Dark</button>
+        </div>
+      </span>
+      <a class="ai" href="08-shortcuts.html" aria-label="Keyboard shortcuts" data-tip="Keyboard shortcuts (?)" data-tip-pos="bottom-end"><svg class="ic"><use href="#i-keyboard"/></svg></a>
+    </div>
+  </header>
+
+  <main class="hs-page">
+    <div class="hs-in">
+      <h1 class="hs-title">Hotspots</h1>
+      <p class="hs-sub">Screens where recording paused to keep the app fast. Each row is a fix for the app team.</p>
+
+      <!-- ═══ Variant: Populated, Mon 9 Nov 2026 ═══ -->
+      <section class="hs" data-v="populated" aria-label="Hotspots on 2026-11-09">
+        <div class="hs-ctl">
+          <span class="lbl">Day (UTC)</span>
+          <div class="hs-day"><button class="ai ai-default" type="button" aria-label="Previous day"><svg class="ic ic-14"><use href="#i-chevron-left"/></svg></button><span class="input">2026-11-09</span><button class="ai ai-default" type="button" aria-label="Next day"><svg class="ic ic-14"><use href="#i-chevron-right"/></svg></button></div>
+          <span class="lbl" style="margin-left:8px">App</span>
+          <button class="input select" type="button" style="width:130px" aria-label="App"><span>All apps</span><svg class="ic"><use href="#i-chevron-down"/></svg></button>
+          <span class="hs-sum"><b>4 areas</b> · 47m 47s paused</span>
+        </div>
+        <div class="hs-tbl">
+          <table class="tbl">
+            <thead><tr>
+              <th aria-sort="none"><button class="th-btn" type="button">App<svg class="ic"><use href="#i-arrows-down-up"/></svg></button></th>
+              <th aria-sort="none"><button class="th-btn" type="button">Remote<svg class="ic"><use href="#i-arrows-down-up"/></svg></button></th>
+              <th data-tip="CSS path of the busiest element" data-tip-pos="bottom-start">Area (CSS path)</th>
+              <th class="r" aria-sort="none" data-tip="Most DOM changes per second while paused" data-tip-pos="bottom"><button class="th-btn" type="button">Peak changes/s<svg class="ic"><use href="#i-arrows-down-up"/></svg></button></th>
+              <th class="r" aria-sort="descending" data-tip="Total time recording was paused here" data-tip-pos="bottom"><button class="th-btn is-sorted" type="button">Paused<svg class="ic"><use href="#i-chevron-down"/></svg></button></th>
+              <th class="r" aria-sort="none"><button class="th-btn" type="button">Pauses<svg class="ic"><use href="#i-arrows-down-up"/></svg></button></th>
+              <th class="r" aria-sort="none"><button class="th-btn" type="button">Users<svg class="ic"><use href="#i-arrows-down-up"/></svg></button></th>
+              <th data-tip="The longest pause. Opens after the access prompt." data-tip-pos="bottom-end">Example</th>
+            </tr></thead>
+            <tbody>
+              <tr><td>blotter</td><td>positions</td>
+                <td class="url"><div class="hs-area"><span class="mid" title=".positions [data-sr-grid=positions] .ag-body">.positions [data-sr-grid=positions] .ag-body</span><button class="ai cp" type="button" aria-label="Copy CSS path"><svg class="ic"><use href="#i-copy"/></svg></button></div></td>
+                <td class="r pk">14,200</td>
+                <td class="r"><div class="hs-paused"><span class="n">38m 12s</span><span class="hs-bar"><i style="--p:100%"></i></span></div></td>
+                <td class="r">41</td><td class="r">7</td>
+                <td class="hs-ex"><a class="btn btn-subtle" href="03-replay-playing.html">Open at 10:47 EST<svg class="ic"><use href="#i-arrow-right"/></svg></a></td></tr>
+              <tr><td>blotter</td><td>orders</td>
+                <td class="url"><div class="hs-area"><span class="mid" title=".orders-blotter [data-sr-grid=orders] .ag-body">.orders-blotter [data-sr-grid=orders] .ag-body</span><button class="ai cp" type="button" aria-label="Copy CSS path"><svg class="ic"><use href="#i-copy"/></svg></button></div></td>
+                <td class="r pk">6,900</td>
+                <td class="r"><div class="hs-paused"><span class="n">4m 03s</span><span class="hs-bar"><i style="--p:10.6%"></i></span></div></td>
+                <td class="r">9</td><td class="r">2</td>
+                <td class="hs-ex"><a class="btn btn-subtle" href="03-replay-playing.html">Open at 14:12 EST<svg class="ic"><use href="#i-arrow-right"/></svg></a></td></tr>
+              <tr><td>blotter</td><td>pricing</td>
+                <td class="url"><div class="hs-area"><span class="mid" title=".pricing-ladder [data-sr-grid=ladder]">.pricing-ladder [data-sr-grid=ladder]</span><button class="ai cp" type="button" aria-label="Copy CSS path"><svg class="ic"><use href="#i-copy"/></svg></button></div></td>
+                <td class="r pk">5,300</td>
+                <td class="r"><div class="hs-paused"><span class="n">2m 40s</span><span class="hs-bar"><i style="--p:7%"></i></span></div></td>
+                <td class="r">6</td><td class="r">3</td>
+                <td class="hs-ex"><a class="btn btn-subtle" href="03-replay-playing.html">Open at 09:31 EST<svg class="ic"><use href="#i-arrow-right"/></svg></a></td></tr>
+              <tr><td>risk-viewer</td><td class="dim">—</td>
+                <td class="url"><div class="hs-area"><span class="mid" title=".risk-heatmap .cell-grid">.risk-heatmap .cell-grid</span><button class="ai cp" type="button" aria-label="Copy CSS path"><svg class="ic"><use href="#i-copy"/></svg></button></div></td>
+                <td class="r pk">3,100</td>
+                <td class="r"><div class="hs-paused"><span class="n">2m 52s</span><span class="hs-bar"><i style="--p:7.5%"></i></span></div></td>
+                <td class="r">2</td><td class="r">1</td>
+                <td class="hs-ex"><a class="btn btn-subtle" href="03-replay-playing.html">Open at 15:05 CST<svg class="ic"><use href="#i-arrow-right"/></svg></a></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ═══ Variant: Partial day (today, UTC). Next-day is disabled; the badge says the numbers will grow. ═══ -->
+      <section class="hs" data-v="partial" aria-label="Hotspots on 2026-11-10, partial day">
+        <div class="hs-ctl">
+          <span class="lbl">Day (UTC)</span>
+          <div class="hs-day"><button class="ai ai-default" type="button" aria-label="Previous day"><svg class="ic ic-14"><use href="#i-chevron-left"/></svg></button><span class="input">2026-11-10</span><button class="ai ai-default" type="button" aria-label="Next day (today is the latest day)" disabled><svg class="ic ic-14"><use href="#i-chevron-right"/></svg></button></div>
+          <span class="badge badge-light c-yellow" tabindex="0" data-tip="Today isn't over (UTC). Numbers will grow." data-tip-pos="bottom">Partial day</span>
+          <span class="lbl" style="margin-left:8px">App</span>
+          <button class="input select" type="button" style="width:130px" aria-label="App"><span>All apps</span><svg class="ic"><use href="#i-chevron-down"/></svg></button>
+          <span class="hs-sum"><b>3 areas</b> · 14m 57s paused so far</span>
+        </div>
+        <div class="hs-tbl">
+          <table class="tbl">
+            <thead><tr>
+              <th aria-sort="none"><button class="th-btn" type="button">App<svg class="ic"><use href="#i-arrows-down-up"/></svg></button></th>
+              <th aria-sort="none"><button class="th-btn" type="button">Remote<svg class="ic"><use href="#i-arrows-down-up"/></svg></button></th>
+              <th data-tip="CSS path of the busiest element" data-tip-pos="bottom-start">Area (CSS path)</th>
+              <th class="r" aria-sort="none" data-tip="Most DOM changes per second while paused" data-tip-pos="bottom"><button class="th-btn" type="button">Peak changes/s<svg class="ic"><use href="#i-arrows-down-up"/></svg></button></th>
+              <th class="r" aria-sort="descending" data-tip="Total time recording was paused here" data-tip-pos="bottom"><button class="th-btn is-sorted" type="button">Paused<svg class="ic"><use href="#i-chevron-down"/></svg></button></th>
+              <th class="r" aria-sort="none"><button class="th-btn" type="button">Pauses<svg class="ic"><use href="#i-arrows-down-up"/></svg></button></th>
+              <th class="r" aria-sort="none"><button class="th-btn" type="button">Users<svg class="ic"><use href="#i-arrows-down-up"/></svg></button></th>
+              <th data-tip="The longest pause. Opens after the access prompt." data-tip-pos="bottom-end">Example</th>
+            </tr></thead>
+            <tbody>
+              <tr><td>blotter</td><td>positions</td>
+                <td class="url"><div class="hs-area"><span class="mid" title=".positions [data-sr-grid=positions] .ag-body">.positions [data-sr-grid=positions] .ag-body</span><button class="ai cp" type="button" aria-label="Copy CSS path"><svg class="ic"><use href="#i-copy"/></svg></button></div></td>
+                <td class="r pk">11,800</td>
+                <td class="r"><div class="hs-paused"><span class="n">12m 20s</span><span class="hs-bar"><i style="--p:100%"></i></span></div></td>
+                <td class="r">14</td><td class="r">4</td>
+                <td class="hs-ex"><a class="btn btn-subtle" href="03-replay-playing.html">Open at 09:24 EST<svg class="ic"><use href="#i-arrow-right"/></svg></a></td></tr>
+              <tr><td>blotter</td><td>orders</td>
+                <td class="url"><div class="hs-area"><span class="mid" title=".orders-blotter [data-sr-grid=orders] .ag-body">.orders-blotter [data-sr-grid=orders] .ag-body</span><button class="ai cp" type="button" aria-label="Copy CSS path"><svg class="ic"><use href="#i-copy"/></svg></button></div></td>
+                <td class="r pk">5,100</td>
+                <td class="r"><div class="hs-paused"><span class="n">1m 45s</span><span class="hs-bar"><i style="--p:14.2%"></i></span></div></td>
+                <td class="r">3</td><td class="r">2</td>
+                <td class="hs-ex"><a class="btn btn-subtle" href="03-replay-playing.html">Open at 11:02 EST<svg class="ic"><use href="#i-arrow-right"/></svg></a></td></tr>
+              <tr><td>blotter</td><td>pricing</td>
+                <td class="url"><div class="hs-area"><span class="mid" title=".pricing-ladder [data-sr-grid=ladder]">.pricing-ladder [data-sr-grid=ladder]</span><button class="ai cp" type="button" aria-label="Copy CSS path"><svg class="ic"><use href="#i-copy"/></svg></button></div></td>
+                <td class="r pk">4,200</td>
+                <td class="r"><div class="hs-paused"><span class="n">52s</span><span class="hs-bar"><i style="--p:7%"></i></span></div></td>
+                <td class="r">2</td><td class="r">1</td>
+                <td class="hs-ex"><a class="btn btn-subtle" href="03-replay-playing.html">Open at 08:47 EST<svg class="ic"><use href="#i-arrow-right"/></svg></a></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ═══ Variant: Empty ═══ -->
+      <section class="hs" data-v="empty" aria-label="Hotspots on 2026-11-09, none">
+        <div class="hs-ctl">
+          <span class="lbl">Day (UTC)</span>
+          <div class="hs-day"><button class="ai ai-default" type="button" aria-label="Previous day"><svg class="ic ic-14"><use href="#i-chevron-left"/></svg></button><span class="input">2026-11-09</span><button class="ai ai-default" type="button" aria-label="Next day"><svg class="ic ic-14"><use href="#i-chevron-right"/></svg></button></div>
+          <span class="lbl" style="margin-left:8px">App</span>
+          <button class="input select" type="button" style="width:130px" aria-label="App"><span>All apps</span><svg class="ic"><use href="#i-chevron-down"/></svg></button>
+        </div>
+        <div class="hs-state">
+          <div class="pn-empty"><svg class="ic" style="width:24px;height:24px"><use href="#i-flame"/></svg><b>No paused screens on 2026-11-09 (UTC).</b>Recording was complete for every app.</div>
+        </div>
+      </section>
+
+      <!-- ═══ Variant: Loading (5 skeleton rows) ═══ -->
+      <section class="hs" data-v="loading" aria-label="Loading hotspots" aria-busy="true">
+        <div class="hs-ctl">
+          <span class="lbl">Day (UTC)</span>
+          <div class="hs-day"><button class="ai ai-default" type="button" aria-label="Previous day"><svg class="ic ic-14"><use href="#i-chevron-left"/></svg></button><span class="input">2026-11-09</span><button class="ai ai-default" type="button" aria-label="Next day"><svg class="ic ic-14"><use href="#i-chevron-right"/></svg></button></div>
+          <span class="lbl" style="margin-left:8px">App</span>
+          <button class="input select" type="button" style="width:130px" aria-label="App"><span>All apps</span><svg class="ic"><use href="#i-chevron-down"/></svg></button>
+        </div>
+        <div class="hs-tbl">
+          <table class="tbl">
+            <thead><tr><th>App</th><th>Remote</th><th>Area (CSS path)</th><th class="r">Peak changes/s</th><th class="r">Paused</th><th class="r">Pauses</th><th class="r">Users</th><th>Example</th></tr></thead>
+            <tbody>
+              <tr class="hs-skel"><td><span class="skeleton" style="width:60px"></span></td><td><span class="skeleton" style="width:70px"></span></td><td class="url"><span class="skeleton" style="width:78%"></span></td><td><span class="skeleton" style="width:48px;margin-left:auto"></span></td><td><span class="skeleton" style="width:110px;margin-left:auto"></span></td><td><span class="skeleton" style="width:24px;margin-left:auto"></span></td><td><span class="skeleton" style="width:24px;margin-left:auto"></span></td><td><span class="skeleton" style="width:110px"></span></td></tr>
+              <tr class="hs-skel"><td><span class="skeleton" style="width:60px"></span></td><td><span class="skeleton" style="width:56px"></span></td><td class="url"><span class="skeleton" style="width:64%"></span></td><td><span class="skeleton" style="width:48px;margin-left:auto"></span></td><td><span class="skeleton" style="width:90px;margin-left:auto"></span></td><td><span class="skeleton" style="width:24px;margin-left:auto"></span></td><td><span class="skeleton" style="width:24px;margin-left:auto"></span></td><td><span class="skeleton" style="width:110px"></span></td></tr>
+              <tr class="hs-skel"><td><span class="skeleton" style="width:60px"></span></td><td><span class="skeleton" style="width:64px"></span></td><td class="url"><span class="skeleton" style="width:70%"></span></td><td><span class="skeleton" style="width:48px;margin-left:auto"></span></td><td><span class="skeleton" style="width:80px;margin-left:auto"></span></td><td><span class="skeleton" style="width:24px;margin-left:auto"></span></td><td><span class="skeleton" style="width:24px;margin-left:auto"></span></td><td><span class="skeleton" style="width:110px"></span></td></tr>
+              <tr class="hs-skel"><td><span class="skeleton" style="width:72px"></span></td><td><span class="skeleton" style="width:20px"></span></td><td class="url"><span class="skeleton" style="width:52%"></span></td><td><span class="skeleton" style="width:48px;margin-left:auto"></span></td><td><span class="skeleton" style="width:70px;margin-left:auto"></span></td><td><span class="skeleton" style="width:24px;margin-left:auto"></span></td><td><span class="skeleton" style="width:24px;margin-left:auto"></span></td><td><span class="skeleton" style="width:110px"></span></td></tr>
+              <tr class="hs-skel"><td><span class="skeleton" style="width:60px"></span></td><td><span class="skeleton" style="width:60px"></span></td><td class="url"><span class="skeleton" style="width:58%"></span></td><td><span class="skeleton" style="width:48px;margin-left:auto"></span></td><td><span class="skeleton" style="width:60px;margin-left:auto"></span></td><td><span class="skeleton" style="width:24px;margin-left:auto"></span></td><td><span class="skeleton" style="width:24px;margin-left:auto"></span></td><td><span class="skeleton" style="width:110px"></span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ═══ Variant: Error ═══ -->
+      <section class="hs" data-v="error" aria-label="Hotspots failed to load">
+        <div class="hs-ctl">
+          <span class="lbl">Day (UTC)</span>
+          <div class="hs-day"><button class="ai ai-default" type="button" aria-label="Previous day"><svg class="ic ic-14"><use href="#i-chevron-left"/></svg></button><span class="input">2026-11-09</span><button class="ai ai-default" type="button" aria-label="Next day"><svg class="ic ic-14"><use href="#i-chevron-right"/></svg></button></div>
+          <span class="lbl" style="margin-left:8px">App</span>
+          <button class="input select" type="button" style="width:130px" aria-label="App"><span>All apps</span><svg class="ic"><use href="#i-chevron-down"/></svg></button>
+        </div>
+        <div class="alert c-red hs-err" role="alert">
+          <svg class="ic" style="color:var(--sr-danger);margin-top:1px"><use href="#i-circle-x"/></svg>
+          <div class="grow"><div class="alert-title">Couldn't load hotspots (HTTP 500).</div></div>
+          <button class="btn btn-light c-red" type="button">Retry</button>
+        </div>
+      </section>
+    </div>
+  </main>
+</div>
+</body>
+</html>

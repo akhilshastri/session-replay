@@ -116,7 +116,7 @@ flowchart LR
 - Every `/api/*` request needs `X-SR-UI: 1` first (L17).
 - Query routes are chained and exported as `export type QueryApi = typeof api`, so the UI can use `hc<QueryApi>`.
 - Use `zValidator('query' | 'json' | 'param', schema)` on `/api/*`. Ingest parses the body by hand (gzip, see below).
-- The replay UI is built with **Bun** (06-L1). Its build must not write anything under `dist/assets/`, because that would collide with `/assets/:sha256` (06 checks it with a test).
+- The replay UI is built with **Vite** (06-L1, `build.assetsDir: 'ui'`). Its build must not write anything under `dist/assets/`, because that would collide with `/assets/:sha256` (06 checks it with a test). The static route serves `/ui/*`, `/theme-boot.js` and `index.html`.
 - **Metrics port 9464:** `/metrics` only.
 
 ```ts
@@ -785,7 +785,7 @@ spec:
 
 ### Contract change requests (to 03 and 01)
 
-C1–C9 from the first draft are applied (03, 01 D30, 06). C9 now reads: the replay UI's **Bun** build must not write under `dist/assets/` (devil X28).
+C1–C9 from the first draft are applied (03, 01 D30, 06). C9 now reads: the replay UI's **Vite** build (`build.assetsDir: 'ui'`; Bun until 2026-11-11) must not write under `dist/assets/` (devil X28).
 
 | # | Change | Why |
 |---|---|---|
@@ -907,3 +907,4 @@ Still open, needed before B5 (01 Q36, Q37):
 - 2026-11-10 — Auditor pass (01): S13 waits for K3 and runs once, with P1's rates.
 - 2026-11-10 — Console capture (01 D43, 03-L15): `sr:console` `error` and `warn` lines become action rows and `console.error` counts as an error; S4 tests it. Ingest walks each batch once, so MVP2's `extract()` (09) can plug in.
 - 2026-11-10 — Console and analytics review merged (leader): console action rows carry `name` = level, a 200-character summary and `count` (new `count` column); `console.error` lines count in `counts.consoleErrors` (new `console_errors` column), not `errors`; L1 notes 09's per-query runner.
+- 2026-11-11 — Replay UI build note reworded (leader, from 06 L1): Vite with `build.assetsDir: 'ui'`; the static route also serves `/ui/*` and `/theme-boot.js`.
